@@ -1,0 +1,195 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+}
+
+enum PurchaseStatus {
+  DRAFT
+  ORDERED
+  PAID
+  IN_CHINA_TRANSIT
+  HANDED_TO_CARGO
+  IN_TRANSIT_TO_KYRGYZSTAN
+  ARRIVED
+}
+
+enum LogisticsType {
+  CHINA_INTERNAL_TRANSPORT
+  CARGO
+  KYRGYZSTAN_INTERNAL_TRANSPORT
+  OTHER
+}
+
+enum Currency {
+  CNY
+  KGS
+  USD
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         UserRole  @default(OWNER)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  auditLogs    AuditLog[]
+
+  @@index([role])
+}
+
+model ProductCategory {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  products  Product[]
+}
+
+model Product {
+  id                      String          @id @default(uuid())
+  code                    String          @unique
+  name                    String
+  categoryId              String
+  category                ProductCategory @relation(fields: [categoryId], references: [id])
+  unit                    String
+  imageUrl                String?
+  unitWeightKg            Decimal         @db.Decimal(14, 3)
+  defaultPurchasePriceCny Decimal?        @db.Decimal(14, 4)
+  isActive                Boolean         @default(true)
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+  purchaseItems           PurchaseItem[]
+
+  @@index([name])
+  @@index([isActive])
+  @@index([categoryId])
+  @@index([code])
+}
+
+model Supplier {
+  id          String     @id @default(uuid())
+  name        String
+  companyName String?
+  phone       String
+  wechat      String?
+  address     String?
+  city        String?
+  notes       String?
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  purchases   Purchase[]
+
+  @@index([name])
+  @@index([isActive])
+  @@index([phone])
+}
+
+model Purchase {
+  id                            String        @id @default(uuid())
+  number                        String        @unique
+  supplierId                    String
+  supplier                      Supplier      @relation(fields: [supplierId], references: [id])
+  status                        PurchaseStatus @default(DRAFT)
+  exchangeRateCnyToKgs          Decimal       @db.Decimal(14, 6)
+  notes                         String?
+
+  totalPositions                Int           @default(0)
+  totalQuantity                 Decimal       @default(0) @db.Decimal(14, 3)
+  totalWeightKg                 Decimal       @default(0) @db.Decimal(14, 3)
+  totalPurchaseCny              Decimal       @default(0) @db.Decimal(14, 2)
+  totalPurchaseCostKgs          Decimal       @default(0) @db.Decimal(14, 2)
+  totalChinaTransportKgs        Decimal       @default(0) @db.Decimal(14, 2)
+  totalCargoKgs                 Decimal       @default(0) @db.Decimal(14, 2)
+  totalKgInternalTransportKgs   Decimal       @default(0) @db.Decimal(14, 2)
+  totalOtherLogisticsKgs        Decimal       @default(0) @db.Decimal(14, 2)
+  totalLogisticsKgs             Decimal       @default(0) @db.Decimal(14, 2)
+  estimatedTotalLandedCostKgs   Decimal       @default(0) @db.Decimal(14, 2)
+  averageLogisticsCostPerKg     Decimal       @default(0) @db.Decimal(14, 4)
+
+  createdAt                     DateTime      @default(now())
+  updatedAt                     DateTime      @updatedAt
+
+  items                         PurchaseItem[]
+  logistics                     PurchaseLogisticsExpense[]
+
+  @@index([status])
+  @@index([supplierId])
+  @@index([createdAt])
+  @@index([number])
+}
+
+model PurchaseItem {
+  id                              String   @id @default(uuid())
+  purchaseId                      String
+  purchase                        Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId                       String
+  product                         Product  @relation(fields: [productId], references: [id])
+
+  quantity                        Decimal  @db.Decimal(14, 3)
+  unitPriceCny                    Decimal  @db.Decimal(14, 4)
+  totalCny                        Decimal  @db.Decimal(14, 2)
+  unitWeightKg                    Decimal  @db.Decimal(14, 3)
+  totalWeightKg                   Decimal  @db.Decimal(14, 3)
+  exchangeRateCnyToKgs            Decimal  @db.Decimal(14, 6)
+  purchaseCostKgs                 Decimal  @db.Decimal(14, 2)
+
+  allocatedChinaTransportKgs      Decimal  @default(0) @db.Decimal(14, 2)
+  allocatedCargoKgs               Decimal  @default(0) @db.Decimal(14, 2)
+  allocatedKgInternalTransportKgs Decimal  @default(0) @db.Decimal(14, 2)
+  allocatedOtherLogisticsKgs      Decimal  @default(0) @db.Decimal(14, 2)
+  totalAllocatedLogisticsKgs      Decimal  @default(0) @db.Decimal(14, 2)
+  estimatedLandedCostKgs          Decimal  @default(0) @db.Decimal(14, 2)
+  estimatedUnitLandedCostKgs      Decimal  @default(0) @db.Decimal(14, 4)
+
+  createdAt                       DateTime @default(now())
+  updatedAt                       DateTime @updatedAt
+
+  @@unique([purchaseId, productId])
+  @@index([purchaseId])
+  @@index([productId])
+}
+
+model PurchaseLogisticsExpense {
+  id           String        @id @default(uuid())
+  purchaseId   String
+  purchase     Purchase      @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  type         LogisticsType
+  amount       Decimal       @db.Decimal(14, 2)
+  currency     Currency
+  exchangeRate Decimal?      @db.Decimal(14, 6)
+  amountKgs    Decimal       @db.Decimal(14, 2)
+  comment      String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([purchaseId])
+  @@index([type])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  action     String
+  entityType String
+  entityId   String
+  oldValue   Json?
+  newValue   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([action])
+}

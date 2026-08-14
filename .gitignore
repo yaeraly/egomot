@@ -1,0 +1,14 @@
+node_modules
+dist
+.next
+coverage
+uploads
+.env
+.env.local
+*.log
+.DS_Store
+apps/api/uploads
+apps/web/.next
+apps/web/out
+apps/api/dist
+prisma/*.db
