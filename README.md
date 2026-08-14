@@ -17,61 +17,70 @@ After seed:
 - Email: `owner@egomot.local`
 - Password: `Owner123!`
 
-## Run locally
+## Run locally (no Docker)
+
+This is the default path. Use the PostgreSQL already installed on the machine (port 5432).
 
 ```bash
+cd ~/Downloads/egomot   # or your clone path
 npm install
-npm run setup
+sudo -u postgres bash scripts/create-local-postgres.sh
+```
+
+Put this in `apps/api/.env` (port **5432**, not 5433):
+
+```
+DATABASE_URL=postgresql://egomot:egomot@localhost:5432/egomot?schema=public
+JWT_SECRET=change-me-in-production
+JWT_EXPIRES_IN=7d
+OWNER_EMAIL=owner@egomot.local
+OWNER_PASSWORD=Owner123!
+PORT=3001
+WEB_ORIGIN=http://localhost:3000
+```
+
+```bash
+echo "NEXT_PUBLIC_API_URL=http://localhost:3001" > apps/web/.env.local
+cd apps/api && npx prisma generate && npx prisma migrate deploy && npx prisma db seed && cd ../..
+```
+
+Start **two terminals**:
+
+```bash
 npm run dev:api    # http://localhost:3001
+```
+
+```bash
 npm run dev:web    # http://localhost:3000
 ```
 
-`npm run setup` starts Docker Postgres on **port 5433**, writes env files if missing, migrates, and seeds the OWNER.
+Open http://localhost:3000 (the UI). Do not open 3001 in the browser — that is the API.
 
-Docker uses 5433 so it does not clash with a PostgreSQL already installed on 5432.
-
-### Manual steps
+If Next.js says port 3000 is in use, free it. Otherwise it will steal 3001 from the API:
 
 ```bash
-docker compose up -d postgres
-cp .env.example apps/api/.env
-cp apps/web/.env.example apps/web/.env.local
-npm install
-cd apps/api && npx prisma generate && npx prisma migrate deploy && npx prisma db seed
+sudo fuser -k 3000/tcp
+npm run dev:web
 ```
 
-`apps/api/.env` must contain:
+Or from the repo root:
+
+```bash
+npm run setup
+```
+
+`setup` uses local Postgres on 5432 when Docker is not installed.
+
+## Optional: Docker Postgres
+
+Only if Docker is installed. Compose maps Postgres to port **5433**.
 
 ```
 DATABASE_URL=postgresql://egomot:egomot@localhost:5433/egomot?schema=public
 ```
 
-### Existing local PostgreSQL (no Docker)
-
-If Postgres is already running on 5432 and you see `PrismaClientInitializationError` / `P1000`, the `egomot` user does not exist (or the password is wrong). Create it:
-
-```bash
-sudo -u postgres bash scripts/create-local-postgres.sh
-```
-
-Then set in `apps/api/.env`:
-
-```
-DATABASE_URL=postgresql://egomot:egomot@localhost:5432/egomot?schema=public
-```
-
-and run:
-
-```bash
-cd apps/api && npx prisma migrate deploy && npx prisma db seed
-```
-
-Or point `DATABASE_URL` at your own user/password/database.
-
-### Tests
+## Tests
 
 ```bash
 npm test
 ```
-
-Purchase formulas, validation, status rules, and audit-log event creation run as Jest unit tests (no database required).

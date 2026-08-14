@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Start Docker Postgres, write env files if missing, migrate and seed.
+# Prepare env files, database, migrations and OWNER seed.
+# Uses local PostgreSQL on 5432 when Docker is not installed.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -7,12 +8,13 @@ cd "$ROOT"
 
 API_ENV="$ROOT/apps/api/.env"
 WEB_ENV="$ROOT/apps/web/.env.local"
+LOCAL_URL="postgresql://egomot:egomot@localhost:5432/egomot?schema=public"
 DOCKER_URL="postgresql://egomot:egomot@localhost:5433/egomot?schema=public"
-OLD_DEFAULT_URL="postgresql://egomot:egomot@localhost:5432/egomot"
 
 write_api_env() {
+  local url="$1"
   cat > "$API_ENV" <<EOF
-DATABASE_URL=${DOCKER_URL}
+DATABASE_URL=${url}
 JWT_SECRET=change-me-in-production
 JWT_EXPIRES_IN=7d
 OWNER_EMAIL=owner@egomot.local
@@ -22,10 +24,21 @@ WEB_ORIGIN=http://localhost:3000
 EOF
 }
 
-if [ ! -f "$API_ENV" ]; then
-  write_api_env
-  echo "Wrote $API_ENV"
-fi
+set_database_url() {
+  local url="$1"
+  if [ ! -f "$API_ENV" ]; then
+    write_api_env "$url"
+    echo "Wrote $API_ENV"
+    return
+  fi
+  tmp="$(mktemp)"
+  if grep -q '^DATABASE_URL=' "$API_ENV"; then
+    sed "s|^DATABASE_URL=.*|DATABASE_URL=${url}|" "$API_ENV" > "$tmp" && mv "$tmp" "$API_ENV"
+  else
+    printf 'DATABASE_URL=%s\n' "$url" | cat - "$API_ENV" > "$tmp" && mv "$tmp" "$API_ENV"
+  fi
+  echo "Set DATABASE_URL in apps/api/.env"
+}
 
 if [ ! -f "$WEB_ENV" ]; then
   echo "NEXT_PUBLIC_API_URL=http://localhost:3001" > "$WEB_ENV"
@@ -33,9 +46,9 @@ if [ ! -f "$WEB_ENV" ]; then
 fi
 
 if command -v docker >/dev/null 2>&1; then
-  echo "Starting Docker Postgres on localhost:5433..."
+  echo "Docker found. Starting Postgres on localhost:5433..."
   docker compose up -d postgres
-  echo "Waiting for Postgres to become ready..."
+  echo "Waiting for Postgres..."
   ready=0
   for _ in $(seq 1 40); do
     if docker compose exec -T postgres pg_isready -U egomot -d egomot >/dev/null 2>&1; then
@@ -45,20 +58,22 @@ if command -v docker >/dev/null 2>&1; then
     sleep 1
   done
   if [ "$ready" != "1" ]; then
-    echo "Postgres did not become ready. Check: docker compose logs postgres"
+    echo "Docker Postgres did not become ready. Check: docker compose logs postgres"
     exit 1
   fi
-
-  if grep -q "$OLD_DEFAULT_URL" "$API_ENV"; then
-    tmp="$(mktemp)"
-    sed "s|${OLD_DEFAULT_URL}|${DOCKER_URL}|" "$API_ENV" > "$tmp" && mv "$tmp" "$API_ENV"
-    echo "Updated apps/api/.env to use Docker Postgres on port 5433"
-  fi
+  set_database_url "$DOCKER_URL"
 else
-  echo "Docker is not installed. Using DATABASE_URL from apps/api/.env"
-  echo "If login fails with P1000, create the local role:"
-  echo "  sudo -u postgres bash scripts/create-local-postgres.sh"
-  echo "and set DATABASE_URL to port 5432."
+  echo "Docker is not installed. Using local PostgreSQL on port 5432."
+  set_database_url "$LOCAL_URL"
+  if command -v psql >/dev/null 2>&1 || command -v sudo >/dev/null 2>&1; then
+    echo "Ensuring role and database exist (may ask for sudo)..."
+    if sudo -u postgres bash "$ROOT/scripts/create-local-postgres.sh"; then
+      echo "Local Postgres role/database are ready."
+    else
+      echo "Could not create the role automatically. Run:"
+      echo "  sudo -u postgres bash scripts/create-local-postgres.sh"
+    fi
+  fi
 fi
 
 echo "Generating Prisma client, applying migrations, seeding OWNER..."
@@ -67,8 +82,11 @@ npx prisma generate
 npx prisma migrate deploy
 npx prisma db seed
 echo
-echo "Database is ready. Start the apps with:"
-echo "  npm run dev:api"
-echo "  npm run dev:web"
+echo "Database is ready."
+echo "  API:  npm run dev:api    -> http://localhost:3001"
+echo "  Web:  npm run dev:web    -> http://localhost:3000"
 echo
 echo "OWNER login: owner@egomot.local / Owner123!"
+echo
+echo "If port 3000 is busy, free it before starting the web app:"
+echo "  sudo fuser -k 3000/tcp"

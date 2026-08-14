@@ -1,34 +1,33 @@
 export const DB_AUTH_HELP = `
-Database authentication failed.
+Database connection failed.
 
-Prisma reached PostgreSQL, but the username/password in DATABASE_URL were rejected (P1000).
+You do not have Docker. Egomot uses the PostgreSQL already installed on this machine,
+on port 5432 — not port 5433.
 
-This almost always means the app is talking to a PostgreSQL that is already installed
-on the machine (often port 5432, user "postgres"), not the Egomot Docker database.
+Fix:
 
-Fix — pick one:
+1) Point apps/api/.env at local Postgres:
 
-1) Docker (recommended, uses port 5433 so it does not clash with local Postgres):
+   DATABASE_URL=postgresql://egomot:egomot@localhost:5432/egomot?schema=public
 
-   npm run setup
-
-   Then in apps/api/.env:
-   DATABASE_URL=postgresql://egomot:egomot@localhost:5433/egomot?schema=public
-
-2) Keep your existing local PostgreSQL on 5432:
+2) Create the database user (once):
 
    sudo -u postgres bash scripts/create-local-postgres.sh
 
-   Then in apps/api/.env:
-   DATABASE_URL=postgresql://egomot:egomot@localhost:5432/egomot?schema=public
+3) Migrate and seed:
 
-3) Use your own Postgres user:
+   cd apps/api && npx prisma migrate deploy && npx prisma db seed
 
-   DATABASE_URL=postgresql://YOUR_USER:YOUR_PASSWORD@localhost:5432/YOUR_DB?schema=public
+Or from the repo root:
 
-   Then: cd apps/api && npx prisma migrate deploy && npx prisma db seed
+   npm run setup
 
-If Docker Postgres was started earlier with different credentials, reset the volume:
+Then start the API on 3001 and the web app on 3000 (never let Next.js take 3001):
 
-   docker compose down -v && docker compose up -d postgres
+   npm run dev:api
+   npm run dev:web
+
+If port 3000 is busy:
+
+   sudo fuser -k 3000/tcp
 `;

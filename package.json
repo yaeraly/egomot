@@ -10,7 +10,7 @@
     "setup": "bash scripts/dev-setup.sh",
     "dev": "npm run dev:api & npm run dev:web",
     "dev:api": "npm run start:dev -w api",
-    "dev:web": "npm run dev -w web",
+    "dev:web": "bash scripts/dev-web.sh",
     "build": "npm run build -w api && npm run build -w web",
     "test": "npm run test -w api",
     "db:up": "docker compose up -d postgres",
