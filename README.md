@@ -19,45 +19,56 @@ After seed:
 
 ## Run locally
 
-### 1. PostgreSQL
+```bash
+npm install
+npm run setup
+npm run dev:api    # http://localhost:3001
+npm run dev:web    # http://localhost:3000
+```
 
-Docker:
+`npm run setup` starts Docker Postgres on **port 5433**, writes env files if missing, migrates, and seeds the OWNER.
+
+Docker uses 5433 so it does not clash with a PostgreSQL already installed on 5432.
+
+### Manual steps
 
 ```bash
 docker compose up -d postgres
-```
-
-Or any PostgreSQL 16 instance. Create database `egomot` and user `egomot` / password `egomot`.
-
-### 2. Environment
-
-```bash
 cp .env.example apps/api/.env
-# apps/api/.env already documented in .env.example
-echo "NEXT_PUBLIC_API_URL=http://localhost:3001" > apps/web/.env.local
-```
-
-### 3. Install, migrate, seed
-
-```bash
+cp apps/web/.env.example apps/web/.env.local
 npm install
-cd apps/api && npx prisma generate && npx prisma migrate deploy && npx prisma db seed && cd ../..
+cd apps/api && npx prisma generate && npx prisma migrate deploy && npx prisma db seed
 ```
 
-### 4. Start API and web
+`apps/api/.env` must contain:
+
+```
+DATABASE_URL=postgresql://egomot:egomot@localhost:5433/egomot?schema=public
+```
+
+### Existing local PostgreSQL (no Docker)
+
+If Postgres is already running on 5432 and you see `PrismaClientInitializationError` / `P1000`, the `egomot` user does not exist (or the password is wrong). Create it:
 
 ```bash
-npm run dev:api
+sudo -u postgres bash scripts/create-local-postgres.sh
 ```
+
+Then set in `apps/api/.env`:
+
+```
+DATABASE_URL=postgresql://egomot:egomot@localhost:5432/egomot?schema=public
+```
+
+and run:
 
 ```bash
-npm run dev:web
+cd apps/api && npx prisma migrate deploy && npx prisma db seed
 ```
 
-- Web: http://localhost:3000
-- API: http://localhost:3001
+Or point `DATABASE_URL` at your own user/password/database.
 
-### 5. Tests
+### Tests
 
 ```bash
 npm test

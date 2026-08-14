@@ -7,11 +7,12 @@ services:
       POSTGRES_PASSWORD: egomot
       POSTGRES_DB: egomot
     ports:
-      - "5432:5432"
+      # 5433 avoids clashing with a system PostgreSQL already bound to 5432
+      - "5433:5432"
     volumes:
       - egomot_pg:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U egomot"]
+      test: ["CMD-SHELL", "pg_isready -U egomot -d egomot"]
       interval: 5s
       timeout: 5s
       retries: 10
