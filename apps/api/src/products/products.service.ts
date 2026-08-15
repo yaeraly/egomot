@@ -29,9 +29,10 @@ export class ProductsService {
       defaultPurchasePriceCny: product.defaultPurchasePriceCny
         ? publicDecimal(product.defaultPurchasePriceCny)
         : null,
-      baseMarkupPercent: product.baseMarkupPercent
-        ? publicDecimal(product.baseMarkupPercent)
-        : null,
+      baseMarkupPercent:
+        product.baseMarkupPercent != null
+          ? publicDecimal(product.baseMarkupPercent)
+          : null,
     };
   }
 

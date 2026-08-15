@@ -30,6 +30,9 @@ export class CreateProductDto {
   defaultPurchasePriceCny?: string | null;
 
   @IsOptional()
+  @Transform(({ value }) =>
+    value === null || value === undefined || value === '' ? null : String(value),
+  )
   @IsString()
   baseMarkupPercent?: string | null;
 
@@ -65,6 +68,9 @@ export class UpdateProductDto {
   defaultPurchasePriceCny?: string | null;
 
   @IsOptional()
+  @Transform(({ value }) =>
+    value === null || value === undefined || value === '' ? null : String(value),
+  )
   @IsString()
   baseMarkupPercent?: string | null;
 

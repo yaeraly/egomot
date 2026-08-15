@@ -23,7 +23,14 @@ export function ProductForm({ product }: { product?: Product }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (product?.categoryId) setCategoryId(product.categoryId);
+    if (!product) return;
+    setName(product.name);
+    setCategoryId(product.categoryId);
+    setUnit(product.unit);
+    setUnitWeightKg(product.unitWeightKg);
+    setDefaultPurchasePriceCny(product.defaultPurchasePriceCny ?? '');
+    setBaseMarkupPercent(product.baseMarkupPercent ?? '');
+    setIsActive(product.isActive);
   }, [product]);
 
   async function onSubmit(e: FormEvent) {

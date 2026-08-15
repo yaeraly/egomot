@@ -39,6 +39,7 @@ describe('ProductsService', () => {
       unit: 'шт',
       unitWeightKg: { toFixed: () => '1.000' },
       defaultPurchasePriceCny: { toFixed: () => '10.00' },
+      baseMarkupPercent: { toFixed: () => '30.0000' },
       isActive: true,
     });
     const result = await service.create({
@@ -47,11 +48,47 @@ describe('ProductsService', () => {
       unit: 'шт',
       unitWeightKg: '1',
       defaultPurchasePriceCny: '10',
+      baseMarkupPercent: '30',
     });
     expect(result.category.id).toBe('cat-1');
+    expect(result.baseMarkupPercent).toBe('30.0000');
     expect(prisma.product.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ categoryId: 'cat-1' }),
+        data: expect.objectContaining({ categoryId: 'cat-1', baseMarkupPercent: expect.anything() }),
+      }),
+    );
+  });
+
+  it('persists and returns baseMarkupPercent on update', async () => {
+    prisma.product.findUnique.mockResolvedValue({
+      id: 'p1',
+      code: 'PRD-0001',
+      name: 'Test',
+      categoryId: 'cat-1',
+      category: { id: 'cat-1', name: 'Моторы', slug: 'motory', isActive: true },
+      unit: 'шт',
+      unitWeightKg: { toFixed: () => '1.000' },
+      defaultPurchasePriceCny: null,
+      baseMarkupPercent: { toFixed: () => '30.0000' },
+      isActive: true,
+    });
+    prisma.product.update.mockResolvedValue({
+      id: 'p1',
+      code: 'PRD-0001',
+      name: 'Test',
+      categoryId: 'cat-1',
+      category: { id: 'cat-1', name: 'Моторы', slug: 'motory', isActive: true },
+      unit: 'шт',
+      unitWeightKg: { toFixed: () => '1.000' },
+      defaultPurchasePriceCny: null,
+      baseMarkupPercent: { toFixed: () => '35.0000' },
+      isActive: true,
+    });
+    const result = await service.update('p1', { baseMarkupPercent: '35' });
+    expect(result.baseMarkupPercent).toBe('35.0000');
+    expect(prisma.product.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ baseMarkupPercent: expect.anything() }),
       }),
     );
   });
