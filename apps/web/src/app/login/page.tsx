@@ -3,7 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
-import { ApiError } from '@/lib/api';
+import { ApiError, loginErrorMessage } from '@/lib/api';
 import { Button, ErrorText, Field, Input } from '@/components/ui';
 
 export default function LoginPage() {
@@ -26,7 +26,7 @@ export default function LoginPage() {
       await login(email, password);
       router.replace('/');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Не удалось войти');
+      setError(err instanceof ApiError ? err.message : loginErrorMessage(0));
     } finally {
       setBusy(false);
     }

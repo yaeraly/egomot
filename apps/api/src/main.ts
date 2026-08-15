@@ -11,7 +11,10 @@ async function bootstrap() {
   if (!existsSync(uploadDir)) mkdirSync(uploadDir, { recursive: true });
   app.useStaticAssets(uploadDir, { prefix: '/uploads/' });
   app.enableCors({
-    origin: process.env.WEB_ORIGIN?.split(',') ?? true,
+    origin:
+      process.env.NODE_ENV === 'production'
+        ? process.env.WEB_ORIGIN?.split(',').map((value) => value.trim()).filter(Boolean) ?? true
+        : true,
     credentials: true,
   });
   app.useGlobalPipes(

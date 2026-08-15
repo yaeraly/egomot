@@ -11,14 +11,19 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
+  normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
+
   async login(dto: LoginDto) {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email.toLowerCase() } });
+    const email = this.normalizeEmail(dto.email);
+    const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user) {
-      throw new UnauthorizedException('Неверный email или пароль');
+      throw new UnauthorizedException('Invalid email or password');
     }
     const ok = await bcrypt.compare(dto.password, user.passwordHash);
     if (!ok) {
-      throw new UnauthorizedException('Неверный email или пароль');
+      throw new UnauthorizedException('Invalid email or password');
     }
     const accessToken = await this.jwt.signAsync({
       sub: user.id,

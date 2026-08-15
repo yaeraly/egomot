@@ -36,6 +36,16 @@ export function assetUrl(path: string | null | undefined): string | null {
   return `${API_URL}${path}`;
 }
 
+export function loginErrorMessage(status: number, backendMessage?: string): string {
+  if (status === 401) {
+    return 'Email же пароль туура эмес';
+  }
+  if (status === 0) {
+    return `API жеткиликтүү эмес (${API_URL}). Серверди иштетиңиз: npm run dev:api`;
+  }
+  return backendMessage || 'Кирүү ишке ашкан жок';
+}
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers = new Headers(options.headers);
@@ -45,16 +55,39 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   }
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, { ...options, headers });
+  } catch {
+    throw new ApiError(loginErrorMessage(0), 0);
+  }
+
   if (res.status === 401 && typeof window !== 'undefined' && !path.startsWith('/auth/login')) {
     setToken(null);
     window.location.href = '/login';
   }
 
   const text = await res.text();
-  const payload = text ? JSON.parse(text) : null;
+  let payload: unknown = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new ApiError(
+        path.startsWith('/auth/login')
+          ? loginErrorMessage(0)
+          : 'Серверден туура эмес жооп алынды',
+        res.status,
+      );
+    }
+  }
+
   if (!res.ok) {
-    throw new ApiError(formatMessage(payload, 'Ошибка запроса'), res.status, payload);
+    const backendMessage = formatMessage(payload, 'Ошибка запроса');
+    const message = path.startsWith('/auth/login')
+      ? loginErrorMessage(res.status, backendMessage)
+      : backendMessage;
+    throw new ApiError(message, res.status, payload);
   }
   return payload as T;
 }

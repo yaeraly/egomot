@@ -39,12 +39,16 @@ async function backfillCategorySlugs() {
 }
 
 async function seedOwner() {
-  const email = process.env.OWNER_EMAIL ?? 'owner@egomot.local';
+  const email = (process.env.OWNER_EMAIL ?? 'owner@egomot.local').trim().toLowerCase();
   const password = process.env.OWNER_PASSWORD ?? 'Owner123!';
   const passwordHash = await bcrypt.hash(password, 10);
   await prisma.user.upsert({
     where: { email },
-    update: {},
+    update: {
+      passwordHash,
+      role: UserRole.OWNER,
+      name: 'Владелец',
+    },
     create: {
       email,
       passwordHash,
@@ -99,6 +103,9 @@ async function verifyCatalog() {
 
 async function main() {
   await seedOwner();
+  const ownerCount = await prisma.user.count({ where: { role: UserRole.OWNER } });
+  // eslint-disable-next-line no-console
+  console.log(`Owner ready: ${process.env.OWNER_EMAIL ?? 'owner@egomot.local'} (${ownerCount} OWNER user(s))`);
   await backfillCategorySlugs();
   await seedCatalog();
   await verifyCatalog();
