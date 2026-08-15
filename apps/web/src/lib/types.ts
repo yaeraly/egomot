@@ -347,6 +347,30 @@ export interface ClientPricingInfo {
 export interface ClientCard {
   client: Client;
   pricing: ClientPricingInfo;
+  debt?: ClientDebtSummary;
+}
+
+export interface ClientDebtSummary {
+  currentDebtKgs: string;
+  openSales: Array<{
+    id: string;
+    number: string;
+    totalAmountKgs: string;
+    paidAmountKgs: string;
+    debtAmountKgs: string;
+    confirmedAt: string | null;
+    saleDate: string;
+  }>;
+  transactions: Array<{
+    id: string;
+    type: string;
+    amountKgs: string;
+    balanceAfterKgs: string;
+    saleNumber: string | null;
+    note: string | null;
+    createdAt: string;
+    recordedBy: { id: string; name: string };
+  }>;
 }
 
 export interface CategoryThreshold {
@@ -397,3 +421,116 @@ export const CLIENT_CATEGORY_LABELS: Record<ClientPricingCategory, string> = {
   GOLD: 'Gold',
   VIP: 'VIP',
 };
+
+export type SaleStatus = 'DRAFT' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED';
+export type SalePaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
+
+export interface PaymentMethod {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+}
+
+export interface PaymentAccount {
+  id: string;
+  userId: string;
+  paymentMethodId: string;
+  name: string;
+  isActive: boolean;
+  paymentMethod: PaymentMethod;
+}
+
+export interface EmployeeBalance {
+  accounts: Array<{
+    accountId: string;
+    accountName: string;
+    paymentMethodCode: string;
+    paymentMethodName: string;
+    balanceKgs: string;
+  }>;
+  totalBalanceKgs: string;
+}
+
+export interface SaleItem {
+  id: string;
+  productId: string;
+  product?: Product;
+  quantity: string;
+  unitCostKgs: string;
+  unitPriceKgs: string;
+  lineTotalKgs: string;
+  baseMarkupPercent: string;
+  clientMarkupPercent: string;
+  finalMarkupPercent: string;
+}
+
+export interface SalePayment {
+  id: string;
+  amountKgs: string;
+  paidAt: string;
+  paymentMethod?: PaymentMethod;
+  paymentAccount?: PaymentAccount;
+  receivedBy?: { id: string; name: string };
+}
+
+export interface Sale {
+  id: string;
+  number: string;
+  clientId: string;
+  client?: Client;
+  soldByUserId: string | null;
+  soldBy?: { id: string; name: string; email?: string } | null;
+  status: SaleStatus;
+  paymentStatus: SalePaymentStatus;
+  saleDate: string;
+  totalAmountKgs: string;
+  paidAmountKgs: string;
+  debtAmountKgs: string;
+  fullyPaidAt: string | null;
+  confirmedAt: string | null;
+  items?: SaleItem[];
+  payments?: SalePayment[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SalePreviewLine {
+  productId: string;
+  quantity: string;
+  unitPriceKgs: string;
+  lineTotalKgs: string;
+  stockQuantity: string;
+  pricing: PriceCalculation;
+}
+
+export interface SalePreview {
+  client: Client;
+  pricing: ClientPricingInfo;
+  currentDebtKgs: string;
+  items: SalePreviewLine[];
+  totalAmountKgs: string;
+}
+
+export interface SaleReceiptView {
+  receipt: { id: string; number: string; saleId: string; createdAt: string };
+  payload: {
+    businessName: string;
+    receiptNumber: string;
+    saleNumber: string;
+    confirmedAt: string;
+    employeeName: string;
+    clientName: string;
+    clientTypeLabel: string;
+    clientCategoryLabel: string;
+    items: Array<{ productName: string; productCode: string; quantity: string; unitPriceKgs: string; lineTotalKgs: string }>;
+    totalAmountKgs: string;
+    payments: Array<{ methodName: string; amountKgs: string }>;
+    paidAmountKgs: string;
+    debtAmountKgs: string;
+    clientTotalDebtKgs: string;
+  };
+  text: string;
+  whatsapp: { phone: string; url: string | null; available: boolean };
+}

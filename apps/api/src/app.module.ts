@@ -12,6 +12,7 @@ import { ReportsModule } from './reports/reports.module';
 import { SettingsModule } from './settings/settings.module';
 import { ClientsModule } from './clients/clients.module';
 import { PricingModule } from './pricing/pricing.module';
+import { FinanceModule } from './finance/finance.module';
 import { SalesModule } from './sales/sales.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 
@@ -31,6 +32,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     SettingsModule,
     ClientsModule,
     PricingModule,
+    FinanceModule,
     SalesModule,
   ],
 })

@@ -16,12 +16,9 @@ export class CreateSaleItemDto {
   quantity!: string;
 }
 
-export class CreateSaleDto {
+export class PreviewSaleDto {
   @IsString()
   clientId!: string;
-
-  @IsDateString()
-  saleDate!: string;
 
   @IsArray()
   @ArrayMinSize(1)
@@ -30,7 +27,38 @@ export class CreateSaleDto {
   items!: CreateSaleItemDto[];
 }
 
-export class AddPaymentDto {
+export class SalePaymentEntryDto {
+  @IsString()
+  paymentAccountId!: string;
+
+  @IsString()
+  amountKgs!: string;
+}
+
+export class ConfirmSaleDto {
+  @IsString()
+  clientId!: string;
+
+  @IsOptional()
+  @IsDateString()
+  saleDate?: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateSaleItemDto)
+  items!: CreateSaleItemDto[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SalePaymentEntryDto)
+  payments!: SalePaymentEntryDto[];
+}
+
+export class PayDebtDto {
+  @IsString()
+  paymentAccountId!: string;
+
   @IsString()
   amountKgs!: string;
 

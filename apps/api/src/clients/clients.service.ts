@@ -6,6 +6,7 @@ import {
 import { ClientType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ClientCategoryService } from '../pricing/client-category.service';
+import { ClientDebtService } from '../sales/client-debt.service';
 import { CreateClientDto, UpdateClientDto } from './dto/client.dto';
 
 const CLIENT_TYPE_LABELS: Record<ClientType, string> = {
@@ -26,6 +27,7 @@ export class ClientsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly clientCategory: ClientCategoryService,
+    private readonly clientDebt: ClientDebtService,
   ) {}
 
   async list(search?: string, active?: string) {
@@ -60,6 +62,7 @@ export class ClientsService {
       client.id,
       client.clientType,
     );
+    const debt = await this.clientDebt.getDebtSummary(client.id);
 
     return {
       client,
@@ -71,7 +74,13 @@ export class ClientsService {
           ? CATEGORY_LABELS[pricing.nextCategory]
           : null,
       },
+      debt,
     };
+  }
+
+  async getDebt(id: string) {
+    await this.get(id);
+    return this.clientDebt.getDebtSummary(id);
   }
 
   private validateClientType(clientType?: ClientType) {

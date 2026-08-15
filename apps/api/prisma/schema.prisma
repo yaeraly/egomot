@@ -38,10 +38,12 @@ enum ReceiptDiscrepancyType {
 
 enum InventoryMovementType {
   PURCHASE_RECEIPT
+  SALE
 }
 
 enum InventoryReferenceType {
   PURCHASE_RECEIPT
+  SALE
 }
 
 enum LogisticsType {
@@ -89,6 +91,16 @@ enum SaleReturnStatus {
   CANCELLED
 }
 
+enum ClientDebtTransactionType {
+  SALE_DEBT
+  DEBT_PAYMENT
+}
+
+enum FinancialTransactionType {
+  SALE_PAYMENT
+  DEBT_PAYMENT
+}
+
 model User {
   id                 String              @id @default(uuid())
   email              String              @unique
@@ -100,6 +112,11 @@ model User {
   auditLogs          AuditLog[]
   purchaseReceipts   PurchaseReceipt[]
   inventoryMovements InventoryMovement[]
+  paymentAccounts    PaymentAccount[]
+  salesSold          Sale[]              @relation("SaleSoldBy")
+  paymentsReceived   Payment[]           @relation("PaymentReceivedBy")
+  financialTransactions FinancialTransaction[] @relation("FinancialTransactionRecordedBy")
+  clientDebtTransactions ClientDebtTransaction[] @relation("ClientDebtRecordedBy")
 
   @@index([role])
 }
@@ -402,6 +419,7 @@ model Client {
   sales       Sale[]
   payments    Payment[]
   returns     SaleReturn[]
+  debtTransactions ClientDebtTransaction[]
 
   @@index([name])
   @@index([clientType])
@@ -441,23 +459,32 @@ model Sale {
   number         String            @unique
   clientId       String
   client         Client            @relation(fields: [clientId], references: [id])
+  soldByUserId   String?
+  soldBy         User?             @relation("SaleSoldBy", fields: [soldByUserId], references: [id])
   status         SaleStatus        @default(DRAFT)
   paymentStatus  SalePaymentStatus @default(UNPAID)
   saleDate       DateTime          @db.Date
   totalAmountKgs Decimal           @default(0) @db.Decimal(14, 2)
   paidAmountKgs  Decimal           @default(0) @db.Decimal(14, 2)
+  debtAmountKgs  Decimal           @default(0) @db.Decimal(14, 2)
   fullyPaidAt    DateTime?
+  confirmedAt    DateTime?
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
   items          SaleItem[]
   payments       Payment[]
   returns        SaleReturn[]
+  receipt        SaleReceipt?
+  financialTransactions FinancialTransaction[]
+  debtTransactions ClientDebtTransaction[]
 
   @@index([clientId])
+  @@index([soldByUserId])
   @@index([status])
   @@index([paymentStatus])
   @@index([saleDate])
   @@index([fullyPaidAt])
+  @@index([confirmedAt])
   @@index([number])
 }
 
@@ -481,19 +508,121 @@ model SaleItem {
   @@index([productId])
 }
 
-model Payment {
+model PaymentMethod {
   id        String   @id @default(uuid())
-  saleId    String
-  sale      Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  clientId  String
-  client    Client   @relation(fields: [clientId], references: [id])
-  amountKgs Decimal  @db.Decimal(14, 2)
-  paidAt    DateTime
+  code      String   @unique
+  name      String
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  accounts  PaymentAccount[]
+  payments  Payment[]
+
+  @@index([isActive])
+  @@index([sortOrder])
+}
+
+model PaymentAccount {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  paymentMethodId String
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+  name            String
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  payments        Payment[]
+  transactions    FinancialTransaction[]
+
+  @@unique([userId, paymentMethodId])
+  @@index([userId])
+  @@index([paymentMethodId])
+  @@index([isActive])
+}
+
+model Payment {
+  id                 String   @id @default(uuid())
+  saleId             String
+  sale               Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  clientId           String
+  client             Client   @relation(fields: [clientId], references: [id])
+  paymentMethodId    String
+  paymentMethod      PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+  paymentAccountId   String
+  paymentAccount     PaymentAccount @relation(fields: [paymentAccountId], references: [id])
+  receivedByUserId   String
+  receivedBy         User     @relation("PaymentReceivedBy", fields: [receivedByUserId], references: [id])
+  amountKgs          Decimal  @db.Decimal(14, 2)
+  paidAt             DateTime
+  createdAt          DateTime @default(now())
+  financialTransaction FinancialTransaction?
+  debtTransaction      ClientDebtTransaction?
 
   @@index([saleId])
   @@index([clientId])
+  @@index([paymentMethodId])
+  @@index([paymentAccountId])
+  @@index([receivedByUserId])
   @@index([paidAt])
+}
+
+model FinancialTransaction {
+  id                 String   @id @default(uuid())
+  type               FinancialTransactionType
+  paymentAccountId   String
+  paymentAccount     PaymentAccount @relation(fields: [paymentAccountId], references: [id])
+  saleId             String?
+  sale               Sale?    @relation(fields: [saleId], references: [id])
+  paymentId          String?  @unique
+  payment            Payment? @relation(fields: [paymentId], references: [id])
+  amountKgs          Decimal  @db.Decimal(14, 2)
+  recordedByUserId   String
+  recordedBy         User     @relation("FinancialTransactionRecordedBy", fields: [recordedByUserId], references: [id])
+  transactionAt      DateTime
+  note               String?
+  createdAt          DateTime @default(now())
+
+  @@index([paymentAccountId])
+  @@index([saleId])
+  @@index([recordedByUserId])
+  @@index([transactionAt])
+  @@index([type])
+}
+
+model ClientDebtTransaction {
+  id                 String   @id @default(uuid())
+  clientId           String
+  client             Client   @relation(fields: [clientId], references: [id])
+  saleId             String?
+  sale               Sale?    @relation(fields: [saleId], references: [id])
+  type               ClientDebtTransactionType
+  amountKgs          Decimal  @db.Decimal(14, 2)
+  balanceAfterKgs    Decimal  @db.Decimal(14, 2)
+  recordedByUserId   String
+  recordedBy         User     @relation("ClientDebtRecordedBy", fields: [recordedByUserId], references: [id])
+  paymentId          String?  @unique
+  payment            Payment? @relation(fields: [paymentId], references: [id])
+  note               String?
+  createdAt          DateTime @default(now())
+
+  @@index([clientId])
+  @@index([saleId])
+  @@index([recordedByUserId])
+  @@index([createdAt])
+  @@index([type])
+}
+
+model SaleReceipt {
+  id        String   @id @default(uuid())
+  saleId    String   @unique
+  sale      Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  number    String   @unique
+  payload   Json
+  createdAt DateTime @default(now())
+
+  @@index([number])
 }
 
 model SaleReturn {

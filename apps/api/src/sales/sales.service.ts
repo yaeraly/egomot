@@ -3,7 +3,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import type { User } from '@prisma/client';
 import {
+  ClientDebtTransactionType,
+  FinancialTransactionType,
+  InventoryMovementType,
+  InventoryReferenceType,
   Prisma,
   SalePaymentStatus,
   SaleReturnStatus,
@@ -13,170 +18,459 @@ import { PrismaService } from '../prisma/prisma.service';
 import { publicDecimal } from '../common/decimal.util';
 import { dec, roundMoney, roundQty } from '../purchases/purchase-calc';
 import { PricingService } from '../pricing/pricing.service';
+import { ClientCategoryService } from '../pricing/client-category.service';
+import { FinanceBalanceService } from '../finance/finance-balance.service';
+import { ClientDebtService } from './client-debt.service';
 import {
-  AddPaymentDto,
-  CreateSaleDto,
+  SaleReceiptService,
+  WhatsAppService,
+} from './sale-receipt.service';
+import {
+  computeInventoryAfterSale,
+  resolvePaymentStatus,
+  SaleValidationError,
+  validatePaymentEntries,
+} from './sale-calc';
+import { SALE_AUDIT_ACTIONS } from './sale-audit';
+import {
+  ConfirmSaleDto,
   CreateSaleReturnDto,
+  PayDebtDto,
+  PreviewSaleDto,
+  SalePaymentEntryDto,
 } from './dto/sale.dto';
+
+const CLIENT_TYPE_LABELS = {
+  RETAIL: 'Розничный',
+  MASTER: 'Мастер',
+  WHOLESALE: 'Оптовый',
+} as const;
+
+const CATEGORY_LABELS = {
+  STANDARD: 'Standard',
+  SILVER: 'Silver',
+  GOLD: 'Gold',
+  VIP: 'VIP',
+} as const;
 
 @Injectable()
 export class SalesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pricing: PricingService,
+    private readonly clientCategory: ClientCategoryService,
+    private readonly finance: FinanceBalanceService,
+    private readonly clientDebt: ClientDebtService,
+    private readonly receiptService: SaleReceiptService,
+    private readonly whatsapp: WhatsAppService,
   ) {}
 
-  private async nextSaleNumber(tx: Prisma.TransactionClient): Promise<string> {
-    const rows = await tx.sale.findMany({
-      where: { number: { startsWith: 'S-' } },
-      select: { number: true },
-    });
-    let max = 0;
-    for (const row of rows) {
-      const match = row.number.match(/^S-(\d+)$/);
-      if (match) max = Math.max(max, Number(match[1]));
+  private saleInclude = {
+    items: { include: { product: { include: { category: true } } } },
+    client: true,
+    soldBy: { select: { id: true, name: true, email: true } },
+    payments: {
+      include: {
+        paymentMethod: true,
+        paymentAccount: true,
+        receivedBy: { select: { id: true, name: true } },
+      },
+    },
+    receipt: true,
+  } as const;
+
+  private handleValidation(error: unknown): never {
+    if (error instanceof SaleValidationError) {
+      throw new BadRequestException(error.messages.join('; '));
     }
-    return `S-${String(max + 1).padStart(5, '0')}`;
+    throw error;
   }
 
-  private async nextReturnNumber(
-    tx: Prisma.TransactionClient,
-  ): Promise<string> {
-    const rows = await tx.saleReturn.findMany({
-      where: { number: { startsWith: 'SR-' } },
-      select: { number: true },
-    });
-    let max = 0;
-    for (const row of rows) {
-      const match = row.number.match(/^SR-(\d+)$/);
-      if (match) max = Math.max(max, Number(match[1]));
+  async list(search?: string, clientId?: string) {
+    const where: Prisma.SaleWhereInput = {};
+    if (clientId) where.clientId = clientId;
+    if (search?.trim()) {
+      const q = search.trim();
+      where.OR = [
+        { number: { contains: q, mode: 'insensitive' } },
+        { client: { name: { contains: q, mode: 'insensitive' } } },
+      ];
     }
-    return `SR-${String(max + 1).padStart(5, '0')}`;
+    const sales = await this.prisma.sale.findMany({
+      where,
+      include: {
+        client: true,
+        soldBy: { select: { id: true, name: true } },
+        items: true,
+        payments: true,
+      },
+      orderBy: [{ confirmedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 200,
+    });
+    return sales.map((sale) => this.serializeSale(sale));
   }
 
-  async create(dto: CreateSaleDto) {
+  async preview(dto: PreviewSaleDto) {
     const client = await this.prisma.client.findUnique({
       where: { id: dto.clientId },
     });
     if (!client) throw new NotFoundException('Клиент не найден');
 
-    const saleDate = new Date(dto.saleDate);
+    const pricingSnapshot = await this.clientCategory.getClientPricingSnapshot(
+      client.id,
+      client.clientType,
+    );
+    const debtSummary = await this.clientDebt.getDebtSummary(client.id);
+
+    const lines = [];
+    let total = dec(0);
+    for (const row of dto.items) {
+      const quantity = roundQty(row.quantity);
+      const price = await this.pricing.calculatePrice(row.productId, dto.clientId);
+      const lineTotal = roundMoney(dec(price.finalPriceKgs).times(quantity));
+      total = total.plus(lineTotal);
+      const stock = await this.prisma.inventory.findUnique({
+        where: { productId: row.productId },
+      });
+      lines.push({
+        productId: row.productId,
+        quantity: publicDecimal(quantity),
+        unitPriceKgs: price.finalPriceKgs,
+        lineTotalKgs: publicDecimal(lineTotal),
+        pricing: price,
+        stockQuantity: stock ? publicDecimal(stock.quantity) : '0',
+      });
+    }
+
+    return {
+      client,
+      pricing: {
+        ...pricingSnapshot,
+        clientTypeLabel: CLIENT_TYPE_LABELS[client.clientType],
+        clientCategoryLabel: CATEGORY_LABELS[pricingSnapshot.clientCategory],
+      },
+      currentDebtKgs: debtSummary.currentDebtKgs,
+      items: lines,
+      totalAmountKgs: publicDecimal(roundMoney(total)),
+    };
+  }
+
+  async confirm(user: User, dto: ConfirmSaleDto) {
+    const client = await this.prisma.client.findUnique({
+      where: { id: dto.clientId },
+    });
+    if (!client) throw new NotFoundException('Клиент не найден');
+    if (!dto.items.length) {
+      throw new BadRequestException('Добавьте товары в продажу');
+    }
+
+    const saleDate = dto.saleDate ? new Date(dto.saleDate) : new Date();
     if (Number.isNaN(saleDate.getTime())) {
       throw new BadRequestException('Некорректная дата продажи');
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const number = await this.nextSaleNumber(tx);
-      let totalAmount = dec(0);
-      const itemCreates: Prisma.SaleItemCreateWithoutSaleInput[] = [];
+    const paymentEntries = dto.payments.filter((p) => dec(p.amountKgs).gt(0));
 
+    try {
+      const pricedItems: Array<{
+        productId: string;
+        quantity: Prisma.Decimal;
+        price: Awaited<ReturnType<PricingService['calculatePrice']>>;
+        lineTotal: Prisma.Decimal;
+      }> = [];
+
+      let totalAmount = dec(0);
       for (const row of dto.items) {
         const quantity = roundQty(row.quantity);
         if (quantity.lte(0)) {
-          throw new BadRequestException('Количество должно быть больше нуля');
+          throw new SaleValidationError([
+            'Количество должно быть больше нуля',
+          ]);
         }
-
         const price = await this.pricing.calculatePrice(
           row.productId,
           dto.clientId,
         );
         const lineTotal = roundMoney(dec(price.finalPriceKgs).times(quantity));
         totalAmount = totalAmount.plus(lineTotal);
-
-        itemCreates.push({
-          product: { connect: { id: row.productId } },
-          quantity,
-          unitCostKgs: dec(price.costPriceKgs),
-          unitPriceKgs: dec(price.finalPriceKgs),
-          lineTotalKgs: lineTotal,
-          baseMarkupPercent: dec(price.baseMarkupPercent),
-          clientMarkupPercent: dec(price.clientMarkupPercent),
-          finalMarkupPercent: dec(price.finalMarkupPercent),
-        });
+        pricedItems.push({ productId: row.productId, quantity, price, lineTotal });
       }
+      totalAmount = roundMoney(totalAmount);
 
-      const sale = await tx.sale.create({
-        data: {
-          number,
-          clientId: dto.clientId,
-          status: SaleStatus.CONFIRMED,
-          paymentStatus: SalePaymentStatus.UNPAID,
-          saleDate,
-          totalAmountKgs: roundMoney(totalAmount),
-          paidAmountKgs: roundMoney(0),
-          items: { create: itemCreates },
-        },
-        include: { items: { include: { product: true } }, client: true },
+      const { paidAmountKgs, debtAmountKgs } = validatePaymentEntries(
+        totalAmount,
+        paymentEntries,
+      );
+      const paymentStatus = resolvePaymentStatus(totalAmount, paidAmountKgs);
+
+      return await this.prisma.$transaction(async (tx) => {
+        const number = await this.nextSaleNumber(tx);
+        const confirmedAt = new Date();
+
+        const sale = await tx.sale.create({
+          data: {
+            number,
+            clientId: dto.clientId,
+            soldByUserId: user.id,
+            status: SaleStatus.COMPLETED,
+            paymentStatus:
+              paymentStatus === 'PAID'
+                ? SalePaymentStatus.PAID
+                : paymentStatus === 'PARTIAL'
+                  ? SalePaymentStatus.PARTIAL
+                  : SalePaymentStatus.UNPAID,
+            saleDate,
+            totalAmountKgs: totalAmount,
+            paidAmountKgs,
+            debtAmountKgs,
+            fullyPaidAt: paymentStatus === 'PAID' ? confirmedAt : null,
+            confirmedAt,
+            items: {
+              create: pricedItems.map((row) => ({
+                productId: row.productId,
+                quantity: row.quantity,
+                unitCostKgs: dec(row.price.costPriceKgs),
+                unitPriceKgs: dec(row.price.finalPriceKgs),
+                lineTotalKgs: row.lineTotal,
+                baseMarkupPercent: dec(row.price.baseMarkupPercent),
+                clientMarkupPercent: dec(row.price.clientMarkupPercent),
+                finalMarkupPercent: dec(row.price.finalMarkupPercent),
+              })),
+            },
+          },
+        });
+
+        for (const row of pricedItems) {
+          const existing = await tx.inventory.findUnique({
+            where: { productId: row.productId },
+          });
+          if (!existing || existing.quantity.lt(row.quantity)) {
+            const product = await tx.product.findUnique({
+              where: { id: row.productId },
+            });
+            throw new SaleValidationError([
+              `Недостаточно товара на складе: ${product?.name ?? row.productId}`,
+            ]);
+          }
+
+          const inventoryUpdate = computeInventoryAfterSale({
+            currentQuantity: existing.quantity,
+            currentTotalValueKgs: existing.totalValueKgs,
+            soldQuantity: row.quantity,
+          });
+
+          await tx.inventory.update({
+            where: { productId: row.productId },
+            data: {
+              quantity: inventoryUpdate.newQuantity.toFixed(3),
+              totalValueKgs: inventoryUpdate.newTotalValueKgs.toFixed(2),
+              averageUnitCostKgs: inventoryUpdate.averageUnitCostKgs.toFixed(4),
+            },
+          });
+
+          await tx.inventoryMovement.create({
+            data: {
+              type: InventoryMovementType.SALE,
+              productId: row.productId,
+              quantity: row.quantity.toFixed(3),
+              previousQuantity: inventoryUpdate.previousQuantity.toFixed(3),
+              newQuantity: inventoryUpdate.newQuantity.toFixed(3),
+              unitCost: inventoryUpdate.unitCost.toFixed(4),
+              totalCost: inventoryUpdate.totalCost.toFixed(2),
+              referenceType: InventoryReferenceType.SALE,
+              referenceId: sale.id,
+              userId: user.id,
+              transactionDate: saleDate,
+            },
+          });
+        }
+
+        for (const entry of paymentEntries) {
+          await this.recordPaymentInTransaction(tx, user, sale, client.id, entry, confirmedAt);
+        }
+
+        if (debtAmountKgs.gt(0)) {
+          await this.clientDebt.recordDebtChange(tx, {
+            clientId: client.id,
+            saleId: sale.id,
+            type: ClientDebtTransactionType.SALE_DEBT,
+            amountKgs: debtAmountKgs,
+            recordedByUserId: user.id,
+            note: `Долг по продаже ${sale.number}`,
+          });
+        }
+
+        const pricingSnapshot = await this.clientCategory.getClientPricingSnapshot(
+          client.id,
+          client.clientType,
+        );
+        const clientTotalDebt = await this.clientDebt.getCurrentDebtKgs(client.id);
+
+        const fullSale = await tx.sale.findUniqueOrThrow({
+          where: { id: sale.id },
+          include: this.saleInclude,
+        });
+
+        const receiptNumber = await this.receiptService.nextReceiptNumber(tx);
+        const payload = this.receiptService.buildPayload({
+          sale: fullSale,
+          clientTypeLabel: CLIENT_TYPE_LABELS[client.clientType],
+          clientCategoryLabel: CATEGORY_LABELS[pricingSnapshot.clientCategory],
+          clientTotalDebtKgs: clientTotalDebt,
+          receiptNumber,
+        });
+
+        await tx.saleReceipt.create({
+          data: {
+            saleId: sale.id,
+            number: receiptNumber,
+            payload: payload as unknown as Prisma.InputJsonValue,
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            action: SALE_AUDIT_ACTIONS.SALE_CONFIRMED,
+            entityType: 'Sale',
+            entityId: sale.id,
+            newValue: {
+              number: sale.number,
+              totalAmountKgs: publicDecimal(totalAmount),
+              paidAmountKgs: publicDecimal(paidAmountKgs),
+              debtAmountKgs: publicDecimal(debtAmountKgs),
+            },
+          },
+        });
+
+        const result = await tx.sale.findUniqueOrThrow({
+          where: { id: sale.id },
+          include: this.saleInclude,
+        });
+        return this.serializeSale(result, payload);
       });
+    } catch (error) {
+      this.handleValidation(error);
+    }
+  }
 
-      return this.serializeSale(sale);
+  private async recordPaymentInTransaction(
+    tx: Prisma.TransactionClient,
+    user: User,
+    sale: { id: string; number: string },
+    clientId: string,
+    entry: SalePaymentEntryDto,
+    paidAt: Date,
+  ) {
+    const amount = roundMoney(entry.amountKgs);
+    if (amount.lte(0)) return;
+
+    const account = await this.finance.resolvePaymentAccount(
+      user.id,
+      entry.paymentAccountId,
+    );
+
+    const payment = await tx.payment.create({
+      data: {
+        saleId: sale.id,
+        clientId,
+        paymentMethodId: account.paymentMethodId,
+        paymentAccountId: account.id,
+        receivedByUserId: user.id,
+        amountKgs: amount,
+        paidAt,
+      },
+    });
+
+    await tx.financialTransaction.create({
+      data: {
+        type: FinancialTransactionType.SALE_PAYMENT,
+        paymentAccountId: account.id,
+        saleId: sale.id,
+        paymentId: payment.id,
+        amountKgs: amount,
+        recordedByUserId: user.id,
+        transactionAt: paidAt,
+        note: `Оплата продажи ${sale.number}`,
+      },
     });
   }
 
-  async addPayment(saleId: string, dto: AddPaymentDto) {
+  async payDebt(user: User, saleId: string, dto: PayDebtDto) {
     const sale = await this.prisma.sale.findUnique({
       where: { id: saleId },
-      include: { payments: true },
+      include: { client: true },
     });
     if (!sale) throw new NotFoundException('Продажа не найдена');
-    if (
-      sale.status === SaleStatus.CANCELLED ||
-      sale.status === SaleStatus.DRAFT
-    ) {
-      throw new BadRequestException('Нельзя принять оплату для этой продажи');
+    if (sale.debtAmountKgs.lte(0)) {
+      throw new BadRequestException('По этой продаже нет долга');
     }
 
     const amount = roundMoney(dto.amountKgs);
     if (amount.lte(0)) {
       throw new BadRequestException('Сумма оплаты должна быть больше нуля');
     }
-
-    const paidAt = dto.paidAt ? new Date(dto.paidAt) : new Date();
-    if (Number.isNaN(paidAt.getTime())) {
-      throw new BadRequestException('Некорректная дата оплаты');
+    if (amount.gt(sale.debtAmountKgs)) {
+      throw new BadRequestException('Сумма превышает долг по продаже');
     }
 
+    const paidAt = dto.paidAt ? new Date(dto.paidAt) : new Date();
+
     return this.prisma.$transaction(async (tx) => {
-      await tx.payment.create({
-        data: {
-          saleId,
-          clientId: sale.clientId,
-          amountKgs: amount,
-          paidAt,
-        },
-      });
+      const entry: SalePaymentEntryDto = {
+        paymentAccountId: dto.paymentAccountId,
+        amountKgs: publicDecimal(amount),
+      };
+      await this.recordPaymentInTransaction(
+        tx,
+        user,
+        sale,
+        sale.clientId,
+        entry,
+        paidAt,
+      );
 
-      const newPaid = roundMoney(dec(sale.paidAmountKgs).plus(amount));
-      const total = roundMoney(sale.totalAmountKgs);
-
-      let paymentStatus: SalePaymentStatus = SalePaymentStatus.PARTIAL;
-      let fullyPaidAt: Date | null = sale.fullyPaidAt;
-      let status = sale.status;
-
-      if (newPaid.gte(total)) {
-        if (newPaid.gt(total)) {
-          throw new BadRequestException('Сумма оплат превышает сумму продажи');
-        }
-        paymentStatus = SalePaymentStatus.PAID;
-        fullyPaidAt = paidAt;
-        status = SaleStatus.COMPLETED;
-      } else if (newPaid.eq(0)) {
-        paymentStatus = SalePaymentStatus.UNPAID;
-        fullyPaidAt = null;
-      }
+      const newPaid = roundMoney(sale.paidAmountKgs.plus(amount));
+      const newDebt = roundMoney(sale.debtAmountKgs.minus(amount));
+      const paymentStatus =
+        newDebt.lte(0) ? SalePaymentStatus.PAID : SalePaymentStatus.PARTIAL;
 
       const updated = await tx.sale.update({
         where: { id: saleId },
         data: {
           paidAmountKgs: newPaid,
+          debtAmountKgs: newDebt,
           paymentStatus,
-          fullyPaidAt,
-          status,
+          fullyPaidAt: newDebt.lte(0) ? paidAt : sale.fullyPaidAt,
         },
-        include: {
-          items: { include: { product: true } },
-          client: true,
-          payments: true,
+        include: this.saleInclude,
+      });
+
+      const payment = await tx.payment.findFirst({
+        where: { saleId, paidAt },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      await this.clientDebt.recordDebtChange(tx, {
+        clientId: sale.clientId,
+        saleId: sale.id,
+        type: ClientDebtTransactionType.DEBT_PAYMENT,
+        amountKgs: amount,
+        recordedByUserId: user.id,
+        paymentId: payment?.id,
+        note: `Погашение долга по продаже ${sale.number}`,
+      });
+
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          action: SALE_AUDIT_ACTIONS.DEBT_PAYMENT,
+          entityType: 'Sale',
+          entityId: sale.id,
+          newValue: {
+            paidAmountKgs: publicDecimal(newPaid),
+            debtAmountKgs: publicDecimal(newDebt),
+          },
         },
       });
 
@@ -184,25 +478,41 @@ export class SalesService {
     });
   }
 
-  async cancel(saleId: string) {
-    const sale = await this.prisma.sale.findUnique({ where: { id: saleId } });
-    if (!sale) throw new NotFoundException('Продажа не найдена');
-    if (sale.paymentStatus === SalePaymentStatus.PAID) {
-      throw new BadRequestException(
-        'Нельзя отменить полностью оплаченную продажу',
-      );
-    }
-
-    const updated = await this.prisma.sale.update({
-      where: { id: saleId },
-      data: {
-        status: SaleStatus.CANCELLED,
-        paymentStatus: SalePaymentStatus.UNPAID,
-        fullyPaidAt: null,
+  async getReceipt(id: string) {
+    const sale = await this.prisma.sale.findUnique({
+      where: { id },
+      include: {
+        ...this.saleInclude,
+        receipt: true,
+        client: true,
       },
-      include: { items: { include: { product: true } }, client: true },
     });
-    return this.serializeSale(updated);
+    if (!sale) throw new NotFoundException('Продажа не найдена');
+    if (!sale.receipt) throw new NotFoundException('Чек не найден');
+
+    const payload = sale.receipt.payload as unknown as import('./sale-receipt.service').SaleReceiptPayload;
+    const text = this.receiptService.formatReceiptText(payload);
+    const whatsappUrl = this.whatsapp.buildShareUrl(sale.client.phone, text);
+
+    return {
+      receipt: sale.receipt,
+      payload,
+      text,
+      whatsapp: {
+        phone: sale.client.phone,
+        url: whatsappUrl,
+        available: Boolean(whatsappUrl),
+      },
+    };
+  }
+
+  async get(id: string) {
+    const sale = await this.prisma.sale.findUnique({
+      where: { id },
+      include: this.saleInclude,
+    });
+    if (!sale) throw new NotFoundException('Продажа не найдена');
+    return this.serializeSale(sale);
   }
 
   async createReturn(saleId: string, dto: CreateSaleReturnDto) {
@@ -269,38 +579,62 @@ export class SalesService {
     });
   }
 
-  async get(id: string) {
-    const sale = await this.prisma.sale.findUnique({
-      where: { id },
-      include: {
-        items: { include: { product: true } },
-        client: true,
-        payments: true,
-      },
+  private async nextSaleNumber(tx: Prisma.TransactionClient): Promise<string> {
+    const rows = await tx.sale.findMany({
+      where: { number: { startsWith: 'S-' } },
+      select: { number: true },
     });
-    if (!sale) throw new NotFoundException('Продажа не найдена');
-    return this.serializeSale(sale);
+    let max = 0;
+    for (const row of rows) {
+      const match = row.number.match(/^S-(\d+)$/);
+      if (match) max = Math.max(max, Number(match[1]));
+    }
+    return `S-${String(max + 1).padStart(5, '0')}`;
   }
 
-  private serializeSale(sale: {
-    totalAmountKgs: Prisma.Decimal;
-    paidAmountKgs: Prisma.Decimal;
-    items: Array<{
-      quantity: Prisma.Decimal;
-      unitCostKgs: Prisma.Decimal;
-      unitPriceKgs: Prisma.Decimal;
-      lineTotalKgs: Prisma.Decimal;
-      baseMarkupPercent: Prisma.Decimal;
-      clientMarkupPercent: Prisma.Decimal;
-      finalMarkupPercent: Prisma.Decimal;
+  private async nextReturnNumber(
+    tx: Prisma.TransactionClient,
+  ): Promise<string> {
+    const rows = await tx.saleReturn.findMany({
+      where: { number: { startsWith: 'SR-' } },
+      select: { number: true },
+    });
+    let max = 0;
+    for (const row of rows) {
+      const match = row.number.match(/^SR-(\d+)$/);
+      if (match) max = Math.max(max, Number(match[1]));
+    }
+    return `SR-${String(max + 1).padStart(5, '0')}`;
+  }
+
+  private serializeSale(
+    sale: {
+      totalAmountKgs: Prisma.Decimal;
+      paidAmountKgs: Prisma.Decimal;
+      debtAmountKgs?: Prisma.Decimal;
+      items: Array<{
+        quantity: Prisma.Decimal;
+        unitCostKgs: Prisma.Decimal;
+        unitPriceKgs: Prisma.Decimal;
+        lineTotalKgs: Prisma.Decimal;
+        baseMarkupPercent: Prisma.Decimal;
+        clientMarkupPercent: Prisma.Decimal;
+        finalMarkupPercent: Prisma.Decimal;
+        [key: string]: unknown;
+      }>;
+      payments?: Array<{
+        amountKgs: Prisma.Decimal;
+        [key: string]: unknown;
+      }>;
       [key: string]: unknown;
-    }>;
-    [key: string]: unknown;
-  }) {
+    },
+    receiptPayload?: import('./sale-receipt.service').SaleReceiptPayload,
+  ) {
     return {
       ...sale,
       totalAmountKgs: publicDecimal(sale.totalAmountKgs),
       paidAmountKgs: publicDecimal(sale.paidAmountKgs),
+      debtAmountKgs: publicDecimal(sale.debtAmountKgs ?? 0),
       items: sale.items.map((item) => ({
         ...item,
         quantity: publicDecimal(item.quantity),
@@ -311,6 +645,11 @@ export class SalesService {
         clientMarkupPercent: publicDecimal(item.clientMarkupPercent),
         finalMarkupPercent: publicDecimal(item.finalMarkupPercent),
       })),
+      payments: (sale.payments ?? []).map((p) => ({
+        ...p,
+        amountKgs: publicDecimal(p.amountKgs),
+      })),
+      receiptPayload,
     };
   }
 

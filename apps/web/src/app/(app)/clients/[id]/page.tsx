@@ -41,7 +41,7 @@ export default function ClientViewPage() {
         <p className="whitespace-pre-wrap">Заметки: {client.notes || '—'}</p>
       </Card>
 
-      <Card className="space-y-3">
+      <Card className="mb-4 space-y-3">
         <h2 className="text-lg font-semibold">Ценообразование</h2>
         <div className="grid gap-2 text-sm sm:grid-cols-2">
           <p>
@@ -69,6 +69,34 @@ export default function ClientViewPage() {
           ) : null}
         </div>
       </Card>
+
+      {card.debt ? (
+        <Card className="space-y-3">
+          <h2 className="text-lg font-semibold">Долг</h2>
+          <p className="text-lg font-semibold text-amber-700">
+            Текущий долг: {money(card.debt.currentDebtKgs)}
+          </p>
+          {card.debt.openSales.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-sm text-muted">Непогашенные продажи</p>
+              {card.debt.openSales.map((sale) => (
+                <Link
+                  key={sale.id}
+                  href={`/sales/${sale.id}`}
+                  className="block rounded-xl border border-line px-3 py-2 text-sm hover:bg-page"
+                >
+                  <p className="font-medium">Продажа {sale.number}</p>
+                  <p className="text-muted">
+                    Долг: {money(sale.debtAmountKgs)} · Итого: {money(sale.totalAmountKgs)}
+                  </p>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted">Нет непогашенных продаж</p>
+          )}
+        </Card>
+      ) : null}
     </div>
   );
 }

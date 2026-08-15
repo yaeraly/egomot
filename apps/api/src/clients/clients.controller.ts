@@ -26,6 +26,11 @@ export class ClientsController {
     return this.clients.list(search, active);
   }
 
+  @Get(':id/debt')
+  debt(@Param('id') id: string) {
+    return this.clients.getDebt(id);
+  }
+
   @Get(':id/card')
   card(@Param('id') id: string) {
     return this.clients.getCard(id);
