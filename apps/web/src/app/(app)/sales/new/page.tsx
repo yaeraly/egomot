@@ -14,7 +14,10 @@ import {
   Sale,
   SalePreview,
 } from '@/lib/types';
-import { Button, Card, ErrorText, Field, Input, PageHeader, Select } from '@/components/ui';
+import { PosCustomerSearch } from '@/components/sales/PosCustomerSearch';
+import { PosPaymentSelector } from '@/components/sales/PosPaymentSelector';
+import { PosProductSearch } from '@/components/sales/PosProductSearch';
+import { Button, Card, ErrorText, Field, Input, PageHeader } from '@/components/ui';
 
 type CartLine = {
   productId: string;
@@ -65,14 +68,6 @@ export default function PosPage() {
     void api<ClientCard>(`/clients/${clientId}/card`).then(setClientCard);
   }, [clientId]);
 
-  const filteredProducts = useMemo(() => {
-    const q = productSearch.trim().toLowerCase();
-    if (!q) return products.slice(0, 20);
-    return products.filter(
-      (p) => p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q),
-    ).slice(0, 20);
-  }, [productSearch, products]);
-
   const totalAmount = useMemo(
     () => cart.reduce((sum, line) => sum + Number(line.lineTotalKgs || 0), 0),
     [cart],
@@ -86,6 +81,13 @@ export default function PosPage() {
   const debtAmount = Math.max(0, totalAmount - paidAmount);
   const previousDebt = Number(clientCard?.debt?.currentDebtKgs ?? 0);
   const projectedTotalDebt = previousDebt + debtAmount;
+
+  function clearClient() {
+    setClientId('');
+    setClientCard(null);
+    setCart([]);
+    setProductSearch('');
+  }
 
   async function addProduct(product: Product) {
     if (!clientId) {
@@ -127,6 +129,7 @@ export default function PosPage() {
           },
         ];
       });
+      setProductSearch('');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось рассчитать цену');
     }
@@ -202,20 +205,21 @@ export default function PosPage() {
 
   return (
     <div>
-      <PageHeader title="Продажа" subtitle="POS" action={<Link href="/sales" className="text-sm text-brand">← К списку</Link>} />
+      <PageHeader
+        title="Новая продажа"
+        subtitle="POS"
+        action={<Link href="/sales" className="text-sm text-brand">← К списку</Link>}
+      />
 
       <Card className="mb-4 space-y-3">
-        <Field label="Клиент">
-          <Select value={clientId} onChange={(e) => { setClientId(e.target.value); setCart([]); }}>
-            <option value="">Выберите клиента</option>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </Select>
-        </Field>
+        <PosCustomerSearch
+          clients={clients}
+          clientId={clientId}
+          onSelect={setClientId}
+          onClear={clearClient}
+        />
         {clientCard ? (
           <div className="rounded-xl bg-page p-3 text-sm">
-            <p className="font-medium">Клиент: {clientCard.client.name}</p>
             <p>Тип: {clientCard.pricing.clientTypeLabel}</p>
             <p>Категория: {clientCard.pricing.clientCategoryLabel}</p>
             <p>Покупки за 90 дней: {money(clientCard.pricing.paidPurchaseAmount90DaysKgs)}</p>
@@ -226,31 +230,20 @@ export default function PosPage() {
         ) : null}
       </Card>
 
-      <Card className="mb-4 space-y-3">
-        <Field label="Поиск товара">
-          <Input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Название или код" />
-        </Field>
-        <div className="max-h-48 space-y-2 overflow-y-auto">
-          {filteredProducts.map((product) => (
-            <button
-              key={product.id}
-              type="button"
-              onClick={() => void addProduct(product)}
-              className="flex w-full items-center justify-between rounded-xl border border-line px-3 py-2 text-left hover:bg-page"
-            >
-              <span>
-                <span className="font-medium">{product.name}</span>
-                <span className="ml-2 text-xs text-muted">{product.code}</span>
-              </span>
-              <span className="text-xs text-muted">Остаток: {stock[product.id] ?? '0'}</span>
-            </button>
-          ))}
-        </div>
+      <Card className="mb-4">
+        <PosProductSearch
+          products={products}
+          stock={stock}
+          search={productSearch}
+          onSearchChange={setProductSearch}
+          onSelect={(product) => void addProduct(product)}
+          clientSelected={Boolean(clientId)}
+        />
       </Card>
 
       <Card className="mb-4 space-y-3">
         <h2 className="font-semibold">Корзина</h2>
-        {cart.length === 0 ? <p className="text-sm text-muted">Добавьте товары</p> : null}
+        {cart.length === 0 ? <p className="text-sm text-muted">Добавьте товары из поиска</p> : null}
         {cart.map((line) => (
           <div key={line.productId} className="rounded-xl border border-line p-3">
             <div className="flex items-start justify-between gap-2">
@@ -258,11 +251,15 @@ export default function PosPage() {
                 <p className="font-medium">{line.product.name}</p>
                 <p className="text-xs text-muted">{line.product.code}</p>
               </div>
-              <button type="button" className="text-sm text-danger" onClick={() => setCart((prev) => prev.filter((r) => r.productId !== line.productId))}>
+              <button
+                type="button"
+                className="text-sm text-danger"
+                onClick={() => setCart((prev) => prev.filter((r) => r.productId !== line.productId))}
+              >
                 Удалить
               </button>
             </div>
-            <div className="mt-2 grid grid-cols-3 gap-2 text-sm">
+            <div className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
               <Field label="Кол-во">
                 <Input
                   inputMode="decimal"
@@ -270,8 +267,8 @@ export default function PosPage() {
                   onChange={(e) => void updateQuantity(line.productId, e.target.value)}
                 />
               </Field>
-              <p>Цена: {money(line.unitPriceKgs)}</p>
-              <p className="font-semibold">Итого: {money(line.lineTotalKgs)}</p>
+              <p className="self-end pb-3">Цена: {money(line.unitPriceKgs)}</p>
+              <p className="self-end pb-3 font-semibold">Итого: {money(line.lineTotalKgs)}</p>
             </div>
           </div>
         ))}
@@ -280,20 +277,14 @@ export default function PosPage() {
 
       <Card className="mb-4 space-y-3">
         <h2 className="font-semibold">Оплата</h2>
-        {accounts.map((acc) => (
-          <Field key={acc.id} label={acc.paymentMethod.name}>
-            <Input
-              inputMode="decimal"
-              value={payments[acc.id] ?? ''}
-              onChange={(e) => setPayments((prev) => ({ ...prev, [acc.id]: e.target.value }))}
-              placeholder="0"
-            />
-          </Field>
-        ))}
-        <p>Оплачено: {money(String(paidAmount))}</p>
-        <p className={debtAmount > 0 ? 'font-medium text-amber-700' : ''}>
-          Новый долг по продаже: {money(String(debtAmount))}
-        </p>
+        <PosPaymentSelector
+          accounts={accounts}
+          payments={payments}
+          onPaymentsChange={setPayments}
+          totalAmount={totalAmount}
+          paidAmount={paidAmount}
+          debtAmount={debtAmount}
+        />
         {clientId ? (
           <p className="font-semibold text-amber-800">
             Общий долг клиента после продажи: {money(String(projectedTotalDebt))}
