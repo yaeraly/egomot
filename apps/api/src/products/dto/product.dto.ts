@@ -3,6 +3,7 @@ import {
   IsBoolean,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -13,8 +14,7 @@ export class CreateProductDto {
   @MaxLength(200)
   name!: string;
 
-  @IsString()
-  @MinLength(1)
+  @IsUUID()
   categoryId!: string;
 
   @IsString()
@@ -43,7 +43,7 @@ export class UpdateProductDto {
   name?: string;
 
   @IsOptional()
-  @IsString()
+  @IsUUID()
   categoryId?: string;
 
   @IsOptional()
@@ -64,11 +64,4 @@ export class UpdateProductDto {
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   isActive?: boolean;
-}
-
-export class CreateCategoryDto {
-  @IsString()
-  @MinLength(1)
-  @MaxLength(120)
-  name!: string;
 }

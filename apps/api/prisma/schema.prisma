@@ -47,27 +47,33 @@ model User {
   @@index([role])
 }
 
-model ProductCategory {
+model Category {
   id        String    @id @default(uuid())
   name      String    @unique
+  slug      String    @unique
+  isActive  Boolean   @default(true)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   products  Product[]
+
+  @@index([isActive])
+  @@index([slug])
+  @@map("Category")
 }
 
 model Product {
-  id                      String          @id @default(uuid())
-  code                    String          @unique
-  name                    String
+  id                      String   @id @default(uuid())
+  code                    String   @unique
+  name                    String   @unique
   categoryId              String
-  category                ProductCategory @relation(fields: [categoryId], references: [id])
+  category                Category @relation(fields: [categoryId], references: [id])
   unit                    String
   imageUrl                String?
-  unitWeightKg            Decimal         @db.Decimal(14, 3)
-  defaultPurchasePriceCny Decimal?        @db.Decimal(14, 4)
-  isActive                Boolean         @default(true)
-  createdAt               DateTime        @default(now())
-  updatedAt               DateTime        @updatedAt
+  unitWeightKg            Decimal  @db.Decimal(12, 3)
+  defaultPurchasePriceCny Decimal? @db.Decimal(12, 2)
+  isActive                Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
   purchaseItems           PurchaseItem[]
 
   @@index([name])

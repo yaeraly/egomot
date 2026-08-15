@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,7 +9,7 @@ import { createWriteStream, mkdirSync, existsSync, unlinkSync } from 'fs';
 import { extname, join } from 'path';
 import { pipeline } from 'stream/promises';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateCategoryDto, CreateProductDto, UpdateProductDto } from './dto/product.dto';
+import { CreateProductDto, UpdateProductDto } from './dto/product.dto';
 import { publicDecimal } from '../common/decimal.util';
 
 @Injectable()
@@ -18,7 +19,7 @@ export class ProductsService {
   private serialize(product: {
     unitWeightKg: Prisma.Decimal;
     defaultPurchasePriceCny: Prisma.Decimal | null;
-    category: { id: string; name: string };
+    category: { id: string; name: string; slug: string; isActive: boolean };
     [key: string]: unknown;
   }) {
     return {
@@ -31,19 +32,25 @@ export class ProductsService {
   }
 
   async nextCode(): Promise<string> {
-    const last = await this.prisma.product.findFirst({
-      where: { code: { startsWith: 'T-' } },
-      orderBy: { code: 'desc' },
+    const codes = await this.prisma.product.findMany({
+      where: {
+        OR: [{ code: { startsWith: 'PRD-' } }, { code: { startsWith: 'T-' } }],
+      },
+      select: { code: true },
     });
-    const match = last?.code.match(/^T-(\d+)$/);
-    const current = match ? Number(match[1]) : 0;
-    return `T-${String(current + 1).padStart(4, '0')}`;
+    let max = 0;
+    for (const row of codes) {
+      const match = row.code.match(/^(?:PRD|T)-(\d+)$/);
+      if (match) max = Math.max(max, Number(match[1]));
+    }
+    return `PRD-${String(max + 1).padStart(4, '0')}`;
   }
 
-  async list(search?: string, active?: string) {
+  async list(search?: string, active?: string, categoryId?: string) {
     const where: Prisma.ProductWhereInput = {};
     if (active === 'true') where.isActive = true;
     if (active === 'false') where.isActive = false;
+    if (categoryId) where.categoryId = categoryId;
     if (search?.trim()) {
       const q = search.trim();
       where.OR = [
@@ -71,8 +78,8 @@ export class ProductsService {
 
   private parseWeight(value: string) {
     const n = new Prisma.Decimal(value);
-    if (n.lte(0)) {
-      throw new BadRequestException('Вес единицы должен быть больше 0');
+    if (n.lt(0)) {
+      throw new BadRequestException('Вес не может быть отрицательным');
     }
     return n;
   }
@@ -87,15 +94,21 @@ export class ProductsService {
   }
 
   async create(dto: CreateProductDto) {
-    const category = await this.prisma.productCategory.findUnique({
+    const category = await this.prisma.category.findUnique({
       where: { id: dto.categoryId },
     });
     if (!category) throw new BadRequestException('Категория не найдена');
 
+    const name = dto.name.trim();
+    const duplicate = await this.prisma.product.findUnique({ where: { name } });
+    if (duplicate) {
+      throw new ConflictException('Товар с таким названием уже существует');
+    }
+
     const product = await this.prisma.product.create({
       data: {
         code: await this.nextCode(),
-        name: dto.name.trim(),
+        name,
         categoryId: dto.categoryId,
         unit: dto.unit.trim(),
         unitWeightKg: this.parseWeight(dto.unitWeightKg),
@@ -110,10 +123,18 @@ export class ProductsService {
   async update(id: string, dto: UpdateProductDto) {
     await this.get(id);
     if (dto.categoryId) {
-      const category = await this.prisma.productCategory.findUnique({
+      const category = await this.prisma.category.findUnique({
         where: { id: dto.categoryId },
       });
       if (!category) throw new BadRequestException('Категория не найдена');
+    }
+    if (dto.name !== undefined) {
+      const duplicate = await this.prisma.product.findFirst({
+        where: { name: dto.name.trim(), NOT: { id } },
+      });
+      if (duplicate) {
+        throw new ConflictException('Товар с таким названием уже существует');
+      }
     }
     const product = await this.prisma.product.update({
       where: { id },
@@ -136,15 +157,9 @@ export class ProductsService {
     return this.update(id, { isActive: false });
   }
 
-  async listCategories() {
-    return this.prisma.productCategory.findMany({ orderBy: { name: 'asc' } });
-  }
-
-  async createCategory(dto: CreateCategoryDto) {
-    const name = dto.name.trim();
-    const existing = await this.prisma.productCategory.findUnique({ where: { name } });
-    if (existing) return existing;
-    return this.prisma.productCategory.create({ data: { name } });
+  async remove(id: string) {
+    await this.get(id);
+    return this.deactivate(id);
   }
 
   async saveImage(id: string, file: Express.Multer.File) {

@@ -3,15 +3,14 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
-import { Product, ProductCategory, UNITS } from '@/lib/types';
+import { Product, UNITS } from '@/lib/types';
 import { Button, ErrorText, Field, Input, Select } from '@/components/ui';
+import { CategorySelect } from '@/components/CategorySelect';
 
 export function ProductForm({ product }: { product?: Product }) {
   const router = useRouter();
-  const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [name, setName] = useState(product?.name ?? '');
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? '');
-  const [newCategory, setNewCategory] = useState('');
   const [unit, setUnit] = useState(product?.unit ?? 'шт');
   const [unitWeightKg, setUnitWeightKg] = useState(product?.unitWeightKg ?? '');
   const [defaultPurchasePriceCny, setDefaultPurchasePriceCny] = useState(
@@ -23,28 +22,21 @@ export function ProductForm({ product }: { product?: Product }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void api<ProductCategory[]>('/product-categories').then((rows) => {
-      setCategories(rows);
-      if (!product && rows[0]) setCategoryId(rows[0].id);
-    });
+    if (product?.categoryId) setCategoryId(product.categoryId);
   }, [product]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!categoryId) {
+      setError('Выберите категорию');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      let catId = categoryId;
-      if (newCategory.trim()) {
-        const cat = await api<ProductCategory>('/product-categories', {
-          method: 'POST',
-          body: JSON.stringify({ name: newCategory.trim() }),
-        });
-        catId = cat.id;
-      }
       const payload = {
         name,
-        categoryId: catId,
+        categoryId,
         unit,
         unitWeightKg,
         defaultPurchasePriceCny: defaultPurchasePriceCny || null,
@@ -71,18 +63,7 @@ export function ProductForm({ product }: { product?: Product }) {
       <Field label="Название">
         <Input value={name} onChange={(e) => setName(e.target.value)} required />
       </Field>
-      <Field label="Категория">
-        <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} required={!newCategory}>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </Select>
-      </Field>
-      <Field label="Новая категория" hint="Если заполнить, будет создана новая категория">
-        <Input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} />
-      </Field>
+      <CategorySelect value={categoryId} onChange={setCategoryId} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Единица">
           <Select value={unit} onChange={(e) => setUnit(e.target.value)}>
@@ -95,7 +76,7 @@ export function ProductForm({ product }: { product?: Product }) {
           <Input inputMode="decimal" value={unitWeightKg} onChange={(e) => setUnitWeightKg(e.target.value)} required />
         </Field>
       </div>
-      <Field label="Цена закупки по умолчанию, CNY" hint="Необязательно">
+      <Field label="Цена закупки, CNY">
         <Input inputMode="decimal" value={defaultPurchasePriceCny} onChange={(e) => setDefaultPurchasePriceCny(e.target.value)} />
       </Field>
       <Field label="Фото" hint="Необязательно, JPG/PNG/WEBP до 5 МБ">

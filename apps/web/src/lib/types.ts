@@ -24,9 +24,15 @@ export interface AuthUser {
   role: UserRole;
 }
 
-export interface ProductCategory {
+export interface Category {
   id: string;
   name: string;
+  slug: string;
+  isActive: boolean;
+  productCount?: number;
+  createdAt: string;
+  updatedAt: string;
+  products?: Product[];
 }
 
 export interface Product {
@@ -34,7 +40,7 @@ export interface Product {
   code: string;
   name: string;
   categoryId: string;
-  category: ProductCategory;
+  category: Category;
   unit: string;
   imageUrl: string | null;
   unitWeightKg: string;

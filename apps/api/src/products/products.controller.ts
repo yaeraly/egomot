@@ -18,41 +18,50 @@ import { UserRole } from '@prisma/client';
 import { memoryStorage } from 'multer';
 import { Roles } from '../common/roles.decorator';
 import { RolesGuard } from '../common/roles.guard';
-import { CreateCategoryDto, CreateProductDto, UpdateProductDto } from './dto/product.dto';
+import { CreateProductDto, UpdateProductDto } from './dto/product.dto';
 import { ProductsService } from './products.service';
 
-@Controller()
+@Controller('products')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Roles(UserRole.OWNER)
 export class ProductsController {
   constructor(private readonly products: ProductsService) {}
 
-  @Get('products')
-  list(@Query('search') search?: string, @Query('active') active?: string) {
-    return this.products.list(search, active);
+  @Get()
+  list(
+    @Query('search') search?: string,
+    @Query('active') active?: string,
+    @Query('categoryId') categoryId?: string,
+  ) {
+    return this.products.list(search, active, categoryId);
   }
 
-  @Get('products/:id')
+  @Get(':id')
   get(@Param('id') id: string) {
     return this.products.get(id);
   }
 
-  @Post('products')
+  @Post()
   create(@Body() dto: CreateProductDto) {
     return this.products.create(dto);
   }
 
-  @Patch('products/:id')
+  @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
     return this.products.update(id, dto);
   }
 
-  @Post('products/:id/deactivate')
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.products.remove(id);
+  }
+
+  @Post(':id/deactivate')
   deactivate(@Param('id') id: string) {
     return this.products.deactivate(id);
   }
 
-  @Post('products/:id/image')
+  @Post(':id/image')
   @UseInterceptors(
     FileInterceptor('image', {
       storage: memoryStorage(),
@@ -66,18 +75,8 @@ export class ProductsController {
     return this.products.saveImage(id, file);
   }
 
-  @Delete('products/:id/image')
+  @Delete(':id/image')
   removeImage(@Param('id') id: string) {
     return this.products.removeImage(id);
-  }
-
-  @Get('product-categories')
-  categories() {
-    return this.products.listCategories();
-  }
-
-  @Post('product-categories')
-  createCategory(@Body() dto: CreateCategoryDto) {
-    return this.products.createCategory(dto);
   }
 }
