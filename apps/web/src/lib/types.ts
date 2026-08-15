@@ -1,4 +1,4 @@
-export type UserRole = 'OWNER';
+export type UserRole = 'OWNER' | 'WAREHOUSE';
 
 export type PurchaseStatus =
   | 'DRAFT'
@@ -7,7 +7,13 @@ export type PurchaseStatus =
   | 'IN_CHINA_TRANSIT'
   | 'HANDED_TO_CARGO'
   | 'IN_TRANSIT_TO_KYRGYZSTAN'
-  | 'ARRIVED';
+  | 'ARRIVED'
+  | 'RECEIVED'
+  | 'RECEIVED_WITH_DISCREPANCY';
+
+export type PurchaseReceiptStatus = 'DRAFT' | 'RECEIVING' | 'COMPLETED' | 'CANCELLED';
+
+export type ReceiptDiscrepancyType = 'SHORTAGE' | 'EXCESS';
 
 export type LogisticsType =
   | 'CHINA_INTERNAL_TRANSPORT'
@@ -167,6 +173,110 @@ export interface DashboardSummary {
   }>;
 }
 
+export interface InventoryStock {
+  id: string;
+  productId: string;
+  product: Product;
+  quantity: string;
+  averageUnitCostKgs: string;
+  totalValueKgs: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InventoryMovement {
+  id: string;
+  type: 'PURCHASE_RECEIPT';
+  productId: string;
+  product: Product;
+  quantity: string;
+  previousQuantity: string;
+  newQuantity: string;
+  unitCost: string;
+  totalCost: string;
+  referenceType: 'PURCHASE_RECEIPT';
+  referenceId: string;
+  user: { id: string; name: string; email: string };
+  createdAt: string;
+}
+
+export interface PurchaseReceiptItem {
+  id: string;
+  productId: string;
+  product?: Product;
+  purchaseItemId: string;
+  orderedQuantity: string;
+  receivedQuantity: string;
+  difference: string;
+  unitPriceCny: string;
+  unitWeightKg: string;
+  totalWeightKg: string;
+  purchaseCostKgs: string;
+  allocatedChinaTransportKgs: string;
+  allocatedCargoKgs: string;
+  allocatedKgInternalTransportKgs: string;
+  totalAllocatedTransportKgs: string;
+  unitLandedCostKgs: string;
+  totalLandedCostKgs: string;
+}
+
+export interface PurchaseReceiptDiscrepancy {
+  id: string;
+  productId: string;
+  product?: Product;
+  orderedQuantity: string;
+  receivedQuantity: string;
+  difference: string;
+  type: ReceiptDiscrepancyType;
+  comment: string | null;
+}
+
+export interface PurchaseReceipt {
+  id: string;
+  number: string;
+  purchaseId: string;
+  purchase?: Purchase;
+  supplierId: string;
+  supplier?: Supplier;
+  arrivalDate: string;
+  receivedByUserId: string;
+  receivedBy?: AuthUser;
+  status: PurchaseReceiptStatus;
+  comment: string | null;
+  exchangeRateCnyToKgs: string;
+  chinaInternalTransportKgs: string;
+  cargoKgs: string;
+  kyrgyzstanInternalTransportKgs: string;
+  totalTransportKgs: string;
+  totalOrderedQuantity: string;
+  totalReceivedQuantity: string;
+  totalDifference: string;
+  totalLandedCostKgs: string;
+  items?: PurchaseReceiptItem[];
+  discrepancies?: PurchaseReceiptDiscrepancy[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReceiptCalculationPreview {
+  items: Array<Omit<PurchaseReceiptItem, 'id' | 'product' | 'purchaseItemId'>>;
+  discrepancies: Array<Omit<PurchaseReceiptDiscrepancy, 'id' | 'product' | 'comment'>>;
+  totals: {
+    totalOrderedQuantity: string;
+    totalReceivedQuantity: string;
+    totalDifference: string;
+    totalShortage: string;
+    totalExcess: string;
+    chinaInternalTransportKgs: string;
+    cargoKgs: string;
+    kyrgyzstanInternalTransportKgs: string;
+    totalTransportKgs: string;
+    totalLandedCostKgs: string;
+    totalWeightKg: string;
+    exchangeRateCnyToKgs: string;
+  };
+}
+
 export const STATUS_LABELS: Record<PurchaseStatus, string> = {
   DRAFT: 'Черновик',
   ORDERED: 'Заказано',
@@ -175,6 +285,20 @@ export const STATUS_LABELS: Record<PurchaseStatus, string> = {
   HANDED_TO_CARGO: 'Передано карго',
   IN_TRANSIT_TO_KYRGYZSTAN: 'В пути в КР',
   ARRIVED: 'Прибыло',
+  RECEIVED: 'Принято',
+  RECEIVED_WITH_DISCREPANCY: 'Принято с расхождением',
+};
+
+export const RECEIPT_STATUS_LABELS: Record<PurchaseReceiptStatus, string> = {
+  DRAFT: 'Черновик',
+  RECEIVING: 'Приём',
+  COMPLETED: 'Завершён',
+  CANCELLED: 'Отменён',
+};
+
+export const DISCREPANCY_LABELS: Record<ReceiptDiscrepancyType, string> = {
+  SHORTAGE: 'Недостача',
+  EXCESS: 'Излишек',
 };
 
 export const LOGISTICS_LABELS: Record<LogisticsType, string> = {

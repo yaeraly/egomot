@@ -14,6 +14,13 @@ const NAV = [
   { href: '/settings', label: 'Настройки', icon: CogIcon },
 ];
 
+const WAREHOUSE_NAV = [
+  { href: '/warehouse/stock', label: 'Остатки' },
+  { href: '/warehouse/receipts', label: 'Приход' },
+  { href: '/warehouse/movements', label: 'Движения' },
+  { href: '/warehouse/inventory-count', label: 'Инвентаризация' },
+];
+
 function HomeIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -48,6 +55,14 @@ function CartIcon() {
     </svg>
   );
 }
+function WarehouseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M3 9.5 12 4l9 5.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z" />
+      <path d="M9 13h6" />
+    </svg>
+  );
+}
 function CogIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -61,6 +76,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user, loading, logout } = useAuth();
   const [open, setOpen] = useState(false);
+  const warehouseOpen = pathname.startsWith('/warehouse');
 
   useEffect(() => {
     setOpen(false);
@@ -80,8 +96,58 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const nav = (
     <nav className="flex flex-col gap-1">
-      {NAV.map((item) => {
+      {NAV.slice(0, 4).map((item) => {
         const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
+        const Icon = item.icon;
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={cn(
+              'flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm font-medium',
+              active ? 'bg-brand text-white' : 'text-slate-300 hover:bg-white/10 hover:text-white',
+            )}
+          >
+            <Icon />
+            {item.label}
+          </Link>
+        );
+      })}
+
+      <div className="mt-1">
+        <Link
+          href="/warehouse/stock"
+          className={cn(
+            'flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm font-medium',
+            warehouseOpen ? 'bg-brand text-white' : 'text-slate-300 hover:bg-white/10 hover:text-white',
+          )}
+        >
+          <WarehouseIcon />
+          Склад
+        </Link>
+        {warehouseOpen ? (
+          <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-3">
+            {WAREHOUSE_NAV.map((item) => {
+              const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    'flex min-h-10 items-center rounded-lg px-3 text-sm',
+                    active ? 'bg-white/15 text-white' : 'text-slate-400 hover:bg-white/10 hover:text-white',
+                  )}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+
+      {NAV.slice(4).map((item) => {
+        const active = pathname.startsWith(item.href);
         const Icon = item.icon;
         return (
           <Link

@@ -44,15 +44,30 @@ export default function PurchaseViewPage() {
 
   if (!purchase) return <p className="text-muted">Загрузка…</p>;
 
+  const canReceive =
+    purchase.status !== 'DRAFT' &&
+    purchase.status !== 'RECEIVED' &&
+    purchase.status !== 'RECEIVED_WITH_DISCREPANCY';
+
   return (
     <div className="space-y-4">
       <PageHeader
         title={purchase.number}
         subtitle={purchase.supplier?.name}
         action={
-          <Link href={`/purchases/${id}/edit`} className="inline-flex min-h-12 items-center rounded-xl bg-brand px-4 font-semibold text-white">
-            Изменить
-          </Link>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            {canReceive ? (
+              <Link
+                href={`/warehouse/receipts/new?purchaseId=${id}`}
+                className="inline-flex min-h-12 items-center justify-center rounded-xl border border-brand px-4 font-semibold text-brand"
+              >
+                Приём товара
+              </Link>
+            ) : null}
+            <Link href={`/purchases/${id}/edit`} className="inline-flex min-h-12 items-center rounded-xl bg-brand px-4 font-semibold text-white">
+              Изменить
+            </Link>
+          </div>
         }
       />
       <Badge>{STATUS_LABELS[purchase.status]}</Badge>

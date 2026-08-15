@@ -269,6 +269,8 @@ export const PURCHASE_STATUSES = [
   'HANDED_TO_CARGO',
   'IN_TRANSIT_TO_KYRGYZSTAN',
   'ARRIVED',
+  'RECEIVED',
+  'RECEIVED_WITH_DISCREPANCY',
 ] as const;
 
 export type PurchaseStatusValue = (typeof PURCHASE_STATUSES)[number];

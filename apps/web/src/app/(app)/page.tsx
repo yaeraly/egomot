@@ -15,6 +15,8 @@ const STATUS_TONE: Record<PurchaseStatus, 'slate' | 'teal' | 'amber' | 'green' |
   HANDED_TO_CARGO: 'amber',
   IN_TRANSIT_TO_KYRGYZSTAN: 'blue',
   ARRIVED: 'green',
+  RECEIVED: 'green',
+  RECEIVED_WITH_DISCREPANCY: 'amber',
 };
 
 export default function DashboardPage() {

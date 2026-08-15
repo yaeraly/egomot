@@ -255,12 +255,13 @@ type PurchaseCalcInputLogistics = {
 };
 
 describe('status change', () => {
-  it('11. accepts only Phase 1 statuses', () => {
+  it('11. accepts valid purchase statuses including receiving', () => {
     expect(() => assertValidStatus('DRAFT')).not.toThrow();
     expect(() => assertValidStatus('ORDERED')).not.toThrow();
     expect(() => assertValidStatus('ARRIVED')).not.toThrow();
+    expect(() => assertValidStatus('RECEIVED')).not.toThrow();
+    expect(() => assertValidStatus('RECEIVED_WITH_DISCREPANCY')).not.toThrow();
     expect(() => assertValidStatus('COMPLETED')).toThrow(/Недопустимый статус/);
-    expect(() => assertValidStatus('RECEIVED')).toThrow(/Недопустимый статус/);
   });
 });
 

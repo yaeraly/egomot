@@ -9,6 +9,7 @@ datasource db {
 
 enum UserRole {
   OWNER
+  WAREHOUSE
 }
 
 enum PurchaseStatus {
@@ -19,6 +20,28 @@ enum PurchaseStatus {
   HANDED_TO_CARGO
   IN_TRANSIT_TO_KYRGYZSTAN
   ARRIVED
+  RECEIVED
+  RECEIVED_WITH_DISCREPANCY
+}
+
+enum PurchaseReceiptStatus {
+  DRAFT
+  RECEIVING
+  COMPLETED
+  CANCELLED
+}
+
+enum ReceiptDiscrepancyType {
+  SHORTAGE
+  EXCESS
+}
+
+enum InventoryMovementType {
+  PURCHASE_RECEIPT
+}
+
+enum InventoryReferenceType {
+  PURCHASE_RECEIPT
 }
 
 enum LogisticsType {
@@ -35,14 +58,16 @@ enum Currency {
 }
 
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
-  passwordHash String
-  name         String
-  role         UserRole  @default(OWNER)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  auditLogs    AuditLog[]
+  id                 String              @id @default(uuid())
+  email              String              @unique
+  passwordHash       String
+  name               String
+  role               UserRole            @default(OWNER)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  auditLogs          AuditLog[]
+  purchaseReceipts   PurchaseReceipt[]
+  inventoryMovements InventoryMovement[]
 
   @@index([role])
 }
@@ -74,7 +99,11 @@ model Product {
   isActive                Boolean  @default(true)
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
-  purchaseItems           PurchaseItem[]
+  purchaseItems                 PurchaseItem[]
+  inventory                     Inventory?
+  inventoryMovements            InventoryMovement[]
+  purchaseReceiptItems          PurchaseReceiptItem[]
+  purchaseReceiptDiscrepancies  PurchaseReceiptDiscrepancy[]
 
   @@index([name])
   @@index([isActive])
@@ -94,7 +123,8 @@ model Supplier {
   isActive    Boolean    @default(true)
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
-  purchases   Purchase[]
+  purchases        Purchase[]
+  purchaseReceipts PurchaseReceipt[]
 
   @@index([name])
   @@index([isActive])
@@ -128,6 +158,7 @@ model Purchase {
 
   items                         PurchaseItem[]
   logistics                     PurchaseLogisticsExpense[]
+  receipts                      PurchaseReceipt[]
 
   @@index([status])
   @@index([supplierId])
@@ -160,9 +191,124 @@ model PurchaseItem {
 
   createdAt                       DateTime @default(now())
   updatedAt                       DateTime @updatedAt
+  receiptItems                    PurchaseReceiptItem[]
 
   @@unique([purchaseId, productId])
   @@index([purchaseId])
+  @@index([productId])
+}
+
+model Inventory {
+  id                 String   @id @default(uuid())
+  productId          String   @unique
+  product            Product  @relation(fields: [productId], references: [id])
+  quantity           Decimal  @default(0) @db.Decimal(14, 3)
+  averageUnitCostKgs Decimal  @default(0) @db.Decimal(14, 4)
+  totalValueKgs      Decimal  @default(0) @db.Decimal(14, 2)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([productId])
+}
+
+model InventoryMovement {
+  id               String                  @id @default(uuid())
+  type             InventoryMovementType
+  productId        String
+  product          Product                 @relation(fields: [productId], references: [id])
+  quantity         Decimal                 @db.Decimal(14, 3)
+  previousQuantity Decimal                 @db.Decimal(14, 3)
+  newQuantity      Decimal                 @db.Decimal(14, 3)
+  unitCost         Decimal                 @db.Decimal(14, 4)
+  totalCost        Decimal                 @db.Decimal(14, 2)
+  referenceType    InventoryReferenceType
+  referenceId      String
+  userId           String
+  user             User                    @relation(fields: [userId], references: [id])
+  createdAt        DateTime                @default(now())
+
+  @@index([productId])
+  @@index([referenceType, referenceId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model PurchaseReceipt {
+  id                             String                @id @default(uuid())
+  number                         String                @unique
+  purchaseId                     String
+  purchase                       Purchase              @relation(fields: [purchaseId], references: [id])
+  supplierId                     String
+  supplier                       Supplier              @relation(fields: [supplierId], references: [id])
+  arrivalDate                    DateTime              @db.Date
+  receivedByUserId               String
+  receivedBy                     User                  @relation(fields: [receivedByUserId], references: [id])
+  status                         PurchaseReceiptStatus @default(DRAFT)
+  comment                        String?
+  exchangeRateCnyToKgs           Decimal               @db.Decimal(14, 6)
+  chinaInternalTransportKgs      Decimal               @default(0) @db.Decimal(14, 2)
+  cargoKgs                       Decimal               @default(0) @db.Decimal(14, 2)
+  kyrgyzstanInternalTransportKgs Decimal               @default(0) @db.Decimal(14, 2)
+  totalTransportKgs              Decimal               @default(0) @db.Decimal(14, 2)
+  totalOrderedQuantity           Decimal               @default(0) @db.Decimal(14, 3)
+  totalReceivedQuantity          Decimal               @default(0) @db.Decimal(14, 3)
+  totalDifference                Decimal               @default(0) @db.Decimal(14, 3)
+  totalLandedCostKgs             Decimal               @default(0) @db.Decimal(14, 2)
+  createdAt                      DateTime              @default(now())
+  updatedAt                      DateTime              @updatedAt
+  items                          PurchaseReceiptItem[]
+  discrepancies                  PurchaseReceiptDiscrepancy[]
+
+  @@index([purchaseId])
+  @@index([status])
+  @@index([supplierId])
+  @@index([arrivalDate])
+  @@index([number])
+}
+
+model PurchaseReceiptItem {
+  id                              String          @id @default(uuid())
+  receiptId                       String
+  receipt                         PurchaseReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  purchaseItemId                  String
+  purchaseItem                    PurchaseItem    @relation(fields: [purchaseItemId], references: [id])
+  productId                       String
+  product                         Product         @relation(fields: [productId], references: [id])
+  orderedQuantity                 Decimal         @db.Decimal(14, 3)
+  receivedQuantity                Decimal         @default(0) @db.Decimal(14, 3)
+  difference                      Decimal         @default(0) @db.Decimal(14, 3)
+  unitPriceCny                    Decimal         @db.Decimal(14, 4)
+  unitWeightKg                    Decimal         @db.Decimal(14, 3)
+  totalWeightKg                   Decimal         @default(0) @db.Decimal(14, 3)
+  purchaseCostKgs                 Decimal         @default(0) @db.Decimal(14, 2)
+  allocatedChinaTransportKgs      Decimal         @default(0) @db.Decimal(14, 2)
+  allocatedCargoKgs               Decimal         @default(0) @db.Decimal(14, 2)
+  allocatedKgInternalTransportKgs Decimal         @default(0) @db.Decimal(14, 2)
+  totalAllocatedTransportKgs      Decimal         @default(0) @db.Decimal(14, 2)
+  unitLandedCostKgs               Decimal         @default(0) @db.Decimal(14, 4)
+  totalLandedCostKgs              Decimal         @default(0) @db.Decimal(14, 2)
+  createdAt                       DateTime        @default(now())
+  updatedAt                       DateTime        @updatedAt
+
+  @@unique([receiptId, productId])
+  @@index([receiptId])
+  @@index([productId])
+}
+
+model PurchaseReceiptDiscrepancy {
+  id               String                 @id @default(uuid())
+  receiptId        String
+  receipt          PurchaseReceipt        @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product                @relation(fields: [productId], references: [id])
+  orderedQuantity  Decimal                @db.Decimal(14, 3)
+  receivedQuantity Decimal                @db.Decimal(14, 3)
+  difference       Decimal                @db.Decimal(14, 3)
+  type             ReceiptDiscrepancyType
+  comment          String?
+  createdAt        DateTime               @default(now())
+
+  @@index([receiptId])
   @@index([productId])
 }
 
