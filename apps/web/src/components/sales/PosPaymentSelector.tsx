@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { PaymentAccount } from '@/lib/types';
 import { money } from '@/lib/format';
 import { Button, Field, Input } from '@/components/ui';
@@ -23,29 +23,72 @@ export function PosPaymentSelector({
   debtAmount,
 }: Props) {
   const [activeIds, setActiveIds] = useState<string[]>([]);
+  const autoFilledRef = useRef<Record<string, boolean>>({});
 
   const available = useMemo(
     () => accounts.filter((acc) => !activeIds.includes(acc.id)),
     [accounts, activeIds],
   );
 
+  function remainingForAccount(accountId: string, currentPayments = payments) {
+    const otherPaid = activeIds.reduce((sum, id) => {
+      if (id === accountId) return sum;
+      return sum + (Number(currentPayments[id]) || 0);
+    }, 0);
+    return Math.max(0, totalAmount - otherPaid);
+  }
+
   function addMethod(accountId: string) {
     setActiveIds((prev) => (prev.includes(accountId) ? prev : [...prev, accountId]));
+    const remaining = remainingForAccount(accountId);
+    autoFilledRef.current[accountId] = true;
+    onPaymentsChange({
+      ...payments,
+      [accountId]: remaining > 0 ? String(remaining) : '',
+    });
   }
 
   function removeMethod(accountId: string) {
     setActiveIds((prev) => prev.filter((id) => id !== accountId));
+    delete autoFilledRef.current[accountId];
     onPaymentsChange({ ...payments, [accountId]: '' });
   }
 
   function setAmount(accountId: string, value: string) {
+    autoFilledRef.current[accountId] = false;
     onPaymentsChange({ ...payments, [accountId]: value });
   }
 
   function fillRemaining(accountId: string) {
-    const remaining = Math.max(0, totalAmount - paidAmount + Number(payments[accountId] || 0));
+    const remaining = remainingForAccount(accountId);
+    autoFilledRef.current[accountId] = true;
     onPaymentsChange({ ...payments, [accountId]: remaining > 0 ? String(remaining) : '' });
   }
+
+  useEffect(() => {
+    if (totalAmount <= 0 || activeIds.length === 0) return;
+
+    const updates: Record<string, string> = {};
+    let hasUpdates = false;
+
+    for (const accountId of activeIds) {
+      if (!autoFilledRef.current[accountId]) continue;
+      const otherPaid = activeIds.reduce((sum, id) => {
+        if (id === accountId) return sum;
+        return sum + (Number(payments[id]) || 0);
+      }, 0);
+      const remaining = Math.max(0, totalAmount - otherPaid);
+      const nextValue = remaining > 0 ? String(remaining) : '';
+      if ((payments[accountId] ?? '') !== nextValue) {
+        updates[accountId] = nextValue;
+        hasUpdates = true;
+      }
+    }
+
+    if (hasUpdates) {
+      onPaymentsChange({ ...payments, ...updates });
+    }
+  }, [totalAmount, activeIds, payments, onPaymentsChange]);
 
   const activeAccounts = accounts.filter((acc) => activeIds.includes(acc.id));
   const changeAmount = Math.max(0, paidAmount - totalAmount);

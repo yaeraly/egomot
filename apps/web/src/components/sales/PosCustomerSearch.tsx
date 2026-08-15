@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Client, CLIENT_TYPE_LABELS } from '@/lib/types';
 import { Button, Field, SearchBox, cn } from '@/components/ui';
 
@@ -13,6 +13,7 @@ type Props = {
 
 export function PosCustomerSearch({ clients, clientId, onSelect, onClear }: Props) {
   const [query, setQuery] = useState('');
+  const [highlightIndex, setHighlightIndex] = useState(0);
 
   const selected = useMemo(
     () => clients.find((c) => c.id === clientId) ?? null,
@@ -30,6 +31,38 @@ export function PosCustomerSearch({ clients, clientId, onSelect, onClear }: Prop
       return haystack.includes(q);
     }).slice(0, 20);
   }, [clients, query]);
+
+  useEffect(() => {
+    setHighlightIndex(0);
+  }, [query, results.length]);
+
+  function selectClient(client: Client) {
+    onSelect(client.id);
+    setQuery('');
+    setHighlightIndex(0);
+  }
+
+  function onSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (results.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightIndex((prev) => (prev + 1) % results.length);
+      return;
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightIndex((prev) => (prev - 1 + results.length) % results.length);
+      return;
+    }
+
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const client = results[highlightIndex] ?? results[0];
+      if (client) selectClient(client);
+    }
+  }
 
   if (selected) {
     return (
@@ -57,6 +90,7 @@ export function PosCustomerSearch({ clients, clientId, onSelect, onClear }: Prop
         <SearchBox
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={onSearchKeyDown}
           placeholder="Имя, телефон, компания, email"
           autoComplete="off"
         />
@@ -65,16 +99,14 @@ export function PosCustomerSearch({ clients, clientId, onSelect, onClear }: Prop
         {results.length === 0 ? (
           <p className="px-3 py-4 text-sm text-muted">Клиенты не найдены</p>
         ) : (
-          results.map((client) => (
+          results.map((client, index) => (
             <button
               key={client.id}
               type="button"
-              onClick={() => {
-                onSelect(client.id);
-                setQuery('');
-              }}
+              onClick={() => selectClient(client)}
               className={cn(
                 'flex w-full flex-col items-start gap-0.5 border-b border-line px-3 py-2.5 text-left last:border-b-0 hover:bg-page',
+                index === highlightIndex && 'bg-brand/10 ring-1 ring-inset ring-brand/30',
               )}
             >
               <span className="font-medium">{client.name}</span>
@@ -89,8 +121,12 @@ export function PosCustomerSearch({ clients, clientId, onSelect, onClear }: Prop
         )}
       </div>
       {!query.trim() ? (
-        <p className="text-xs text-muted">Показаны первые {results.length} активных клиентов. Уточните поиск.</p>
-      ) : null}
+        <p className="text-xs text-muted">
+          Показаны первые {results.length} активных клиентов. Уточните поиск. Enter — выбрать, ↑↓ — навигация.
+        </p>
+      ) : (
+        <p className="text-xs text-muted">Enter — выбрать, ↑↓ — навигация</p>
+      )}
     </div>
   );
 }
