@@ -20,6 +20,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:seed": "prisma db seed",
+    "import:historical-sales": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/import-historical-sales.ts",
+    "import:historical-sales:dry-run": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/import-historical-sales.ts --dry-run",
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
