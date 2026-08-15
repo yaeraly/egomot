@@ -14,6 +14,7 @@ import { ClientsModule } from './clients/clients.module';
 import { PricingModule } from './pricing/pricing.module';
 import { FinanceModule } from './finance/finance.module';
 import { SalesModule } from './sales/sales.module';
+import { UsersModule } from './users/users.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 
 @Module({
@@ -30,6 +31,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     ReportsModule,
     DashboardModule,
     SettingsModule,
+    UsersModule,
     ClientsModule,
     PricingModule,
     FinanceModule,

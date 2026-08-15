@@ -30,6 +30,7 @@ describe('AuthService', () => {
       email: 'owner@egomot.local',
       name: 'Владелец',
       role: 'OWNER',
+      isActive: true,
       passwordHash: await bcrypt.hash('Owner123!', 10),
     });
     jwt.signAsync.mockResolvedValue('token-123');
@@ -52,11 +53,27 @@ describe('AuthService', () => {
       email: 'owner@egomot.local',
       name: 'Владелец',
       role: 'OWNER',
+      isActive: true,
       passwordHash: await bcrypt.hash('Owner123!', 10),
     });
 
     await expect(
       service.login({ email: 'owner@egomot.local', password: 'wrong' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('rejects deactivated account', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1',
+      email: 'master@egomot.local',
+      name: 'Master',
+      role: 'SALES',
+      isActive: false,
+      passwordHash: await bcrypt.hash('Owner123!', 10),
+    });
+
+    await expect(
+      service.login({ email: 'master@egomot.local', password: 'Owner123!' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 

@@ -108,6 +108,7 @@ model User {
   passwordHash       String
   name               String
   role               UserRole            @default(OWNER)
+  isActive           Boolean             @default(true)
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   auditLogs          AuditLog[]

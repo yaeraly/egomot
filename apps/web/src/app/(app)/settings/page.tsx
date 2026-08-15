@@ -53,7 +53,15 @@ export default function SettingsPage() {
     <div>
       <PageHeader title="Настройки" subtitle="Профиль владельца" />
       <Card className="mb-4">
-        <Link href="/settings/pricing" className="flex min-h-12 items-center justify-between rounded-xl border border-line px-4 font-medium hover:bg-page">
+        <Link href="/finance/accounts" className="flex min-h-12 items-center justify-between rounded-xl border border-line px-4 font-medium hover:bg-page">
+          <span>Счета оплаты</span>
+          <span className="text-muted">→</span>
+        </Link>
+        <Link href="/settings/users" className="mt-2 flex min-h-12 items-center justify-between rounded-xl border border-line px-4 font-medium hover:bg-page">
+          <span>Пользователи</span>
+          <span className="text-muted">→</span>
+        </Link>
+        <Link href="/settings/pricing" className="mt-2 flex min-h-12 items-center justify-between rounded-xl border border-line px-4 font-medium hover:bg-page">
           <span>Ценообразование</span>
           <span className="text-muted">→</span>
         </Link>

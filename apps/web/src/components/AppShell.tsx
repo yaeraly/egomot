@@ -25,6 +25,8 @@ const WAREHOUSE_NAV = [
   { href: '/warehouse/inventory-count', label: 'Инвентаризация' },
 ];
 
+const FINANCE_NAV = [{ href: '/finance/accounts', label: 'Счета' }];
+
 function HomeIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -100,12 +102,22 @@ function CogIcon() {
     </svg>
   );
 }
+function FinanceIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="3" y="6" width="18" height="12" rx="2" />
+      <path d="M3 10h18" />
+      <path d="M7 15h4" />
+    </svg>
+  );
+}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user, loading, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const warehouseOpen = pathname.startsWith('/warehouse');
+  const financeOpen = pathname.startsWith('/finance');
 
   const role = (user?.role ?? 'OWNER') as UserRole;
   const isOwner = role === 'OWNER';
@@ -175,6 +187,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <SaleIcon />
           Мой баланс
         </Link>
+      ) : null}
+
+      {isOwner ? (
+        <div className="mt-1">
+          <Link
+            href="/finance/accounts"
+            className={cn(
+              'flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm font-medium',
+              financeOpen ? 'bg-brand text-white' : 'text-slate-300 hover:bg-white/10 hover:text-white',
+            )}
+          >
+            <FinanceIcon />
+            Финансы
+          </Link>
+          {financeOpen ? (
+            <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-3">
+              {FINANCE_NAV.map((item) => {
+                const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      'flex min-h-10 items-center rounded-lg px-3 text-sm',
+                      active ? 'bg-white/15 text-white' : 'text-slate-400 hover:bg-white/10 hover:text-white',
+                    )}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       {showWarehouse ? (

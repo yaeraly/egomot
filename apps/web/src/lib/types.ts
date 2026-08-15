@@ -30,6 +30,16 @@ export interface AuthUser {
   role: UserRole;
 }
 
+export interface ManagedUser {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Category {
   id: string;
   name: string;
@@ -431,6 +441,25 @@ export interface PaymentMethod {
   name: string;
   isActive: boolean;
   sortOrder: number;
+  accountCount?: number;
+  paymentCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface PaymentMethodDetail extends PaymentMethod {
+  accounts: Array<{
+    id: string;
+    name: string;
+    isActive: boolean;
+    user: {
+      id: string;
+      name: string;
+      email: string;
+      role: UserRole;
+      isActive: boolean;
+    };
+  }>;
 }
 
 export interface PaymentAccount {
