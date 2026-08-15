@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
 import {
@@ -12,7 +12,7 @@ import {
   PurchasePreview,
   Supplier,
 } from '@/lib/types';
-import { Button, Card, ErrorText, Field, Input, Select, Textarea } from './ui';
+import { Button, Card, ErrorText, Field, Input, Select, Textarea, cn } from './ui';
 import { PurchaseSummary } from './PurchaseSummary';
 import { todayInputValue } from '@/lib/date';
 
@@ -51,6 +51,8 @@ export function PurchaseWizard({ purchase }: { purchase?: Purchase }) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [productQuery, setProductQuery] = useState('');
+  const [showProductResults, setShowProductResults] = useState(false);
+  const [productHighlightIndex, setProductHighlightIndex] = useState(0);
   const [supplierId, setSupplierId] = useState(purchase?.supplierId ?? '');
   const [purchaseDate, setPurchaseDate] = useState(purchase?.purchaseDate ?? todayInputValue());
   const [items, setItems] = useState<Line[]>(
@@ -93,6 +95,74 @@ export function PurchaseWizard({ purchase }: { purchase?: Purchase }) {
     }, 200);
     return () => clearTimeout(t);
   }, [productQuery]);
+
+  const selectableProducts = useMemo(
+    () => products.filter((p) => !items.some((i) => i.productId === p.id)),
+    [products, items],
+  );
+
+  useEffect(() => {
+    setProductHighlightIndex(0);
+  }, [productQuery, selectableProducts.length]);
+
+  function addProduct(p: Product): boolean {
+    if (items.some((i) => i.productId === p.id)) return false;
+    setItems((prev) => [
+      ...prev,
+      {
+        productId: p.id,
+        name: p.name,
+        code: p.code,
+        unit: p.unit,
+        quantity: '1',
+        unitPriceCny: p.defaultPurchasePriceCny ?? '',
+        unitWeightKg: p.unitWeightKg,
+      },
+    ]);
+    return true;
+  }
+
+  function selectProduct(p: Product) {
+    if (!addProduct(p)) return;
+    setProductQuery('');
+    setShowProductResults(false);
+    setProductHighlightIndex(0);
+  }
+
+  function onProductSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowProductResults(false);
+      return;
+    }
+
+    if (selectableProducts.length === 0) {
+      if (e.key === 'Enter') e.preventDefault();
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setShowProductResults(true);
+      setProductHighlightIndex((prev) => (prev + 1) % selectableProducts.length);
+      return;
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setShowProductResults(true);
+      setProductHighlightIndex(
+        (prev) => (prev - 1 + selectableProducts.length) % selectableProducts.length,
+      );
+      return;
+    }
+
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const product = selectableProducts[productHighlightIndex] ?? selectableProducts[0];
+      if (product) selectProduct(product);
+    }
+  }
 
   const payload = useMemo(
     () => ({
@@ -155,22 +225,6 @@ export function PurchaseWizard({ purchase }: { purchase?: Purchase }) {
     }
     if (step === 5) return Boolean(preview);
     return true;
-  }
-
-  function addProduct(p: Product) {
-    if (items.some((i) => i.productId === p.id)) return;
-    setItems((prev) => [
-      ...prev,
-      {
-        productId: p.id,
-        name: p.name,
-        code: p.code,
-        unit: p.unit,
-        quantity: '1',
-        unitPriceCny: p.defaultPurchasePriceCny ?? '',
-        unitWeightKg: p.unitWeightKg,
-      },
-    ]);
   }
 
   async function save(markOrdered: boolean) {
@@ -243,24 +297,48 @@ export function PurchaseWizard({ purchase }: { purchase?: Purchase }) {
       {step === 1 && (
         <div className="space-y-3">
           <Field label="Найти товар">
-            <Input value={productQuery} onChange={(e) => setProductQuery(e.target.value)} placeholder="Название или код" />
+            <Input
+              value={productQuery}
+              onChange={(e) => {
+                setProductQuery(e.target.value);
+                setShowProductResults(true);
+              }}
+              onFocus={() => {
+                if (productQuery.trim()) setShowProductResults(true);
+              }}
+              onKeyDown={onProductSearchKeyDown}
+              placeholder="Название или код"
+              autoComplete="off"
+            />
           </Field>
-          <div className="max-h-64 space-y-2 overflow-y-auto">
-            {products.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => addProduct(p)}
-                className="flex w-full items-center justify-between rounded-xl border border-line bg-white p-3 text-left"
-              >
-                <span>
-                  <span className="font-medium">{p.name}</span>
-                  <span className="ml-2 text-xs text-muted">{p.code}</span>
-                </span>
-                <span className="text-sm text-brand">Добавить</span>
-              </button>
-            ))}
-          </div>
+          {showProductResults && productQuery.trim() ? (
+            <div className="max-h-64 space-y-1 overflow-y-auto rounded-xl border border-line bg-white">
+              {selectableProducts.length === 0 ? (
+                <p className="px-3 py-4 text-sm text-muted">Товары не найдены</p>
+              ) : (
+                selectableProducts.map((p, index) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => selectProduct(p)}
+                    className={cn(
+                      'flex w-full items-center justify-between border-b border-line px-3 py-2.5 text-left last:border-b-0 hover:bg-page',
+                      index === productHighlightIndex && 'bg-brand/10 ring-1 ring-inset ring-brand/30',
+                    )}
+                  >
+                    <span>
+                      <span className="font-medium">{p.name}</span>
+                      <span className="ml-2 text-xs text-muted">{p.code}</span>
+                    </span>
+                    <span className="text-sm text-brand">Добавить</span>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
+          {productQuery.trim() ? (
+            <p className="text-xs text-muted">Enter — добавить, ↑↓ — навигация, Esc — закрыть список</p>
+          ) : null}
           <div className="space-y-2">
             {items.map((i) => (
               <Card key={i.productId} className="flex items-center justify-between gap-2">
