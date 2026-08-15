@@ -4,7 +4,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
+import { datetimeLocalToIso, toDatetimeLocalValue } from '@/lib/datetime';
 import { money } from '@/lib/format';
+import { useAuth } from '@/lib/auth';
 import {
   Client,
   ClientCard,
@@ -29,6 +31,8 @@ type CartLine = {
 
 export default function PosPage() {
   const router = useRouter();
+  const { user } = useAuth();
+  const isOwner = user?.role === 'OWNER';
   const [clients, setClients] = useState<Client[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [stock, setStock] = useState<Record<string, string>>({});
@@ -40,6 +44,7 @@ export default function PosPage() {
   const [payments, setPayments] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [saleDateTime, setSaleDateTime] = useState(() => toDatetimeLocalValue(new Date()));
 
   useEffect(() => {
     void Promise.all([
@@ -188,6 +193,9 @@ export default function PosPage() {
         body: JSON.stringify({
           clientId,
           idempotencyKey: crypto.randomUUID(),
+          saleDate: isOwner
+            ? datetimeLocalToIso(saleDateTime)
+            : new Date().toISOString(),
           items: cart.map((line) => ({
             productId: line.productId,
             quantity: line.quantity,
@@ -210,6 +218,21 @@ export default function PosPage() {
         subtitle="POS"
         action={<Link href="/sales" className="text-sm text-brand">← К списку</Link>}
       />
+
+      {isOwner ? (
+        <Card className="mb-4">
+          <Field label="Дата и время продажи">
+            <Input
+              type="datetime-local"
+              value={saleDateTime}
+              onChange={(e) => setSaleDateTime(e.target.value)}
+            />
+          </Field>
+          <p className="mt-1 text-xs text-muted">
+            По умолчанию — текущие дата и время. Измените для ввода исторической продажи.
+          </p>
+        </Card>
+      ) : null}
 
       <Card className="mb-4 space-y-3">
         <PosCustomerSearch

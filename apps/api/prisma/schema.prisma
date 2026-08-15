@@ -473,7 +473,7 @@ model Sale {
   clientCategoryAtSale ClientPricingCategory?
   status         SaleStatus        @default(DRAFT)
   paymentStatus  SalePaymentStatus @default(UNPAID)
-  saleDate       DateTime          @db.Date
+  saleDate       DateTime
   totalAmountKgs Decimal           @default(0) @db.Decimal(14, 2)
   paidAmountKgs  Decimal           @default(0) @db.Decimal(14, 2)
   debtAmountKgs  Decimal           @default(0) @db.Decimal(14, 2)

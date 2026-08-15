@@ -77,7 +77,7 @@ describe('ClientCategoryService', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           clientId: 'client-1',
-          status: SaleStatus.COMPLETED,
+          status: { in: [SaleStatus.COMPLETED, SaleStatus.CONFIRMED] },
           paymentStatus: SalePaymentStatus.PAID,
         }),
       }),
@@ -129,7 +129,9 @@ describe('ClientCategoryService', () => {
 
     const where = prisma.sale.aggregate.mock.calls[0][0].where;
     expect(where.paymentStatus).toBe(SalePaymentStatus.PAID);
-    expect(where.status).toBe(SaleStatus.COMPLETED);
+    expect(where.status).toEqual({
+      in: [SaleStatus.COMPLETED, SaleStatus.CONFIRMED],
+    });
     expect(where.fullyPaidAt).toBeDefined();
   });
 

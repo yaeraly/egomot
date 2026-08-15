@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -19,6 +20,8 @@ import {
   CreateSaleReturnDto,
   PayDebtDto,
   PreviewSaleDto,
+  UpdateSaleDateDto,
+  UpdateSaleItemPriceDto,
 } from './dto/sale.dto';
 import { SalesService } from './sales.service';
 
@@ -60,6 +63,27 @@ export class SalesController {
     @Body() dto: PayDebtDto,
   ) {
     return this.sales.payDebt(user, id, dto);
+  }
+
+  @Patch(':id/date')
+  @Roles(UserRole.OWNER)
+  updateSaleDate(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Body() dto: UpdateSaleDateDto,
+  ) {
+    return this.sales.updateSaleDate(user, id, dto);
+  }
+
+  @Patch(':id/items/:itemId/price')
+  @Roles(UserRole.OWNER)
+  updateSaleItemPrice(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: UpdateSaleItemPriceDto,
+  ) {
+    return this.sales.updateSaleItemPrice(user, id, itemId, dto);
   }
 
   @Post(':id/returns')

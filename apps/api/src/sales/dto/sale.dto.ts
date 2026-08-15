@@ -59,6 +59,16 @@ export class ConfirmSaleDto {
   idempotencyKey?: string;
 }
 
+export class UpdateSaleDateDto {
+  @IsDateString()
+  saleDate!: string;
+}
+
+export class UpdateSaleItemPriceDto {
+  @IsString()
+  unitPriceKgs!: string;
+}
+
 export class PayDebtDto {
   @IsString()
   paymentAccountId!: string;

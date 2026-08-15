@@ -56,7 +56,7 @@ export class ClientCategoryService {
     const paidSales = await this.prisma.sale.aggregate({
       where: {
         clientId,
-        status: SaleStatus.COMPLETED,
+        status: { in: [SaleStatus.COMPLETED, SaleStatus.CONFIRMED] },
         paymentStatus: SalePaymentStatus.PAID,
         fullyPaidAt: { gte: windowStart },
       },
@@ -68,7 +68,7 @@ export class ClientCategoryService {
         clientId,
         status: SaleReturnStatus.COMPLETED,
         sale: {
-          status: SaleStatus.COMPLETED,
+          status: { in: [SaleStatus.COMPLETED, SaleStatus.CONFIRMED] },
           paymentStatus: SalePaymentStatus.PAID,
           fullyPaidAt: { gte: windowStart },
         },
