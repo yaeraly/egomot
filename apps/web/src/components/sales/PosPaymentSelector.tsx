@@ -48,6 +48,7 @@ export function PosPaymentSelector({
   }
 
   const activeAccounts = accounts.filter((acc) => activeIds.includes(acc.id));
+  const changeAmount = Math.max(0, paidAmount - totalAmount);
 
   return (
     <div className="space-y-4">
@@ -118,10 +119,33 @@ export function PosPaymentSelector({
       )}
 
       <div className="rounded-xl bg-page p-3 text-sm">
-        <p>Оплачено: {money(String(paidAmount))}</p>
-        <p className={debtAmount > 0 ? 'font-medium text-amber-700' : ''}>
-          Новый долг по продаже: {money(String(debtAmount))}
-        </p>
+        <dl className="space-y-1">
+          <div className="flex items-baseline justify-between gap-4">
+            <dt className="text-muted">Итого:</dt>
+            <dd className="font-medium tabular-nums">{money(String(totalAmount))}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-4">
+            <dt className="text-muted">Оплачено:</dt>
+            <dd className="font-medium tabular-nums">{money(String(paidAmount))}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-4">
+            <dt className="text-muted">Сдача:</dt>
+            <dd className={changeAmount > 0 ? 'font-semibold text-brand tabular-nums' : 'tabular-nums'}>
+              {money(String(changeAmount))}
+            </dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-4">
+            <dt className="text-muted">Долг:</dt>
+            <dd className={debtAmount > 0 ? 'font-semibold text-amber-700 tabular-nums' : 'tabular-nums'}>
+              {money(String(debtAmount))}
+            </dd>
+          </div>
+        </dl>
+        {changeAmount > 0 ? (
+          <p className="mt-2 text-xs text-muted">
+            Сумма оплат превышает итог — уменьшите введённые суммы перед подтверждением. Сдача для клиента: {money(String(changeAmount))}.
+          </p>
+        ) : null}
       </div>
     </div>
   );
