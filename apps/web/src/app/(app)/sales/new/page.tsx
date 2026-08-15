@@ -27,7 +27,12 @@ type CartLine = {
   quantity: string;
   unitPriceKgs: string;
   lineTotalKgs: string;
+  priceOverridden: boolean;
 };
+
+function lineTotal(unitPriceKgs: string, quantity: string) {
+  return String(Number(unitPriceKgs || 0) * Number(quantity || 0));
+}
 
 export default function PosPage() {
   const router = useRouter();
@@ -117,8 +122,12 @@ export default function PosPage() {
               ? {
                   ...row,
                   quantity: String(Number(row.quantity) + 1),
-                  unitPriceKgs: line.unitPriceKgs,
-                  lineTotalKgs: String(Number(line.unitPriceKgs) * (Number(row.quantity) + 1)),
+                  ...(row.priceOverridden
+                    ? { lineTotalKgs: lineTotal(row.unitPriceKgs, String(Number(row.quantity) + 1)) }
+                    : {
+                        unitPriceKgs: line.unitPriceKgs,
+                        lineTotalKgs: lineTotal(line.unitPriceKgs, String(Number(row.quantity) + 1)),
+                      }),
                 }
               : row,
           );
@@ -131,6 +140,7 @@ export default function PosPage() {
             quantity: '1',
             unitPriceKgs: line.unitPriceKgs,
             lineTotalKgs: line.unitPriceKgs,
+            priceOverridden: false,
           },
         ];
       });
@@ -143,6 +153,21 @@ export default function PosPage() {
   async function updateQuantity(productId: string, quantity: string) {
     if (!clientId) return;
     const qty = quantity || '1';
+    const current = cart.find((row) => row.productId === productId);
+    if (isOwner && current?.priceOverridden) {
+      setCart((prev) =>
+        prev.map((row) =>
+          row.productId === productId
+            ? {
+                ...row,
+                quantity: qty,
+                lineTotalKgs: lineTotal(row.unitPriceKgs, qty),
+              }
+            : row,
+        ),
+      );
+      return;
+    }
     try {
       const preview = await api<SalePreview>('/sales/preview', {
         method: 'POST',
@@ -160,6 +185,7 @@ export default function PosPage() {
                 quantity: qty,
                 unitPriceKgs: line.unitPriceKgs,
                 lineTotalKgs: line.lineTotalKgs,
+                priceOverridden: false,
               }
             : row,
         ),
@@ -167,6 +193,21 @@ export default function PosPage() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось пересчитать цену');
     }
+  }
+
+  function updateUnitPrice(productId: string, unitPriceKgs: string) {
+    setCart((prev) =>
+      prev.map((row) =>
+        row.productId === productId
+          ? {
+              ...row,
+              unitPriceKgs,
+              lineTotalKgs: lineTotal(unitPriceKgs, row.quantity),
+              priceOverridden: true,
+            }
+          : row,
+      ),
+    );
   }
 
   async function confirmSale() {
@@ -199,6 +240,7 @@ export default function PosPage() {
           items: cart.map((line) => ({
             productId: line.productId,
             quantity: line.quantity,
+            ...(isOwner ? { unitPriceKgs: line.unitPriceKgs } : {}),
           })),
           payments: paymentEntries,
         }),
@@ -282,7 +324,7 @@ export default function PosPage() {
                 Удалить
               </button>
             </div>
-            <div className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+            <div className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
               <Field label="Кол-во">
                 <Input
                   inputMode="decimal"
@@ -290,9 +332,27 @@ export default function PosPage() {
                   onChange={(e) => void updateQuantity(line.productId, e.target.value)}
                 />
               </Field>
-              <p className="self-end pb-3">Цена: {money(line.unitPriceKgs)}</p>
-              <p className="self-end pb-3 font-semibold">Итого: {money(line.lineTotalKgs)}</p>
+              {isOwner ? (
+                <Field label="Цена продажи">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      inputMode="decimal"
+                      value={line.unitPriceKgs}
+                      onChange={(e) => updateUnitPrice(line.productId, e.target.value)}
+                    />
+                    <span className="shrink-0 text-muted">KGS</span>
+                  </div>
+                </Field>
+              ) : (
+                <Field label="Цена продажи">
+                  <p className="min-h-12 content-center font-medium">{money(line.unitPriceKgs)}</p>
+                </Field>
+              )}
             </div>
+            <p className="mt-2 text-sm">
+              <span className="text-muted">Сумма: </span>
+              <span className="font-semibold">{money(line.lineTotalKgs)}</span>
+            </p>
           </div>
         ))}
         <p className="text-lg font-bold">ИТОГО: {money(String(totalAmount))}</p>

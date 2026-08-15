@@ -14,6 +14,10 @@ export class CreateSaleItemDto {
 
   @IsString()
   quantity!: string;
+
+  @IsOptional()
+  @IsString()
+  unitPriceKgs?: string;
 }
 
 export class PreviewSaleDto {

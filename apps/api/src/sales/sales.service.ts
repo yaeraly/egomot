@@ -13,6 +13,7 @@ import {
   SalePaymentStatus,
   SaleReturnStatus,
   SaleStatus,
+  UserRole,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { publicDecimal } from '../common/decimal.util';
@@ -196,7 +197,9 @@ export class SalesService {
         productId: string;
         quantity: Prisma.Decimal;
         price: Awaited<ReturnType<PricingService['calculatePrice']>>;
+        unitPrice: Prisma.Decimal;
         lineTotal: Prisma.Decimal;
+        finalMarkupPercent: Prisma.Decimal;
       }> = [];
 
       let totalAmount = dec(0);
@@ -211,9 +214,34 @@ export class SalesService {
           row.productId,
           dto.clientId,
         );
-        const lineTotal = roundMoney(dec(price.finalPriceKgs).times(quantity));
+
+        let unitPrice = roundMoney(price.finalPriceKgs);
+        if (row.unitPriceKgs !== undefined && row.unitPriceKgs.trim() !== '') {
+          if (user.role !== UserRole.OWNER) {
+            throw new BadRequestException(
+              'Только владелец может изменить цену продажи',
+            );
+          }
+          unitPrice = roundMoney(row.unitPriceKgs);
+          if (unitPrice.lte(0)) {
+            throw new BadRequestException('Цена продажи должна быть больше нуля');
+          }
+        }
+
+        const unitCost = dec(price.costPriceKgs);
+        const finalMarkupPercent = unitCost.gt(0)
+          ? roundMarkup(unitPrice.div(unitCost).minus(1).times(100))
+          : roundMarkup(price.finalMarkupPercent);
+        const lineTotal = roundMoney(unitPrice.times(quantity));
         totalAmount = totalAmount.plus(lineTotal);
-        pricedItems.push({ productId: row.productId, quantity, price, lineTotal });
+        pricedItems.push({
+          productId: row.productId,
+          quantity,
+          price,
+          unitPrice,
+          lineTotal,
+          finalMarkupPercent,
+        });
       }
       totalAmount = roundMoney(totalAmount);
 
@@ -261,11 +289,11 @@ export class SalesService {
                 productId: row.productId,
                 quantity: row.quantity,
                 unitCostKgs: dec(row.price.costPriceKgs),
-                unitPriceKgs: dec(row.price.finalPriceKgs),
+                unitPriceKgs: row.unitPrice,
                 lineTotalKgs: row.lineTotal,
                 baseMarkupPercent: dec(row.price.baseMarkupPercent),
                 clientMarkupPercent: dec(row.price.clientMarkupPercent),
-                finalMarkupPercent: dec(row.price.finalMarkupPercent),
+                finalMarkupPercent: row.finalMarkupPercent,
                 clientTypeAtSale: client.clientType,
                 clientCategoryAtSale: pricingSnapshot.clientCategory,
               })),
