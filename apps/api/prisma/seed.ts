@@ -1,6 +1,4 @@
 import {
-  ClientPricingCategory,
-  ClientType,
   PrismaClient,
   UserRole,
 } from '@prisma/client';
@@ -10,21 +8,12 @@ import {
   CATALOG_CATEGORY_NAMES,
   CATALOG_PRODUCTS,
 } from './catalog-data';
+import {
+  DEFAULT_CATEGORY_THRESHOLDS,
+  DEFAULT_MARKUP_MATRIX,
+} from './pricing-defaults';
 
 const prisma = new PrismaClient();
-
-const CLIENT_TYPES: ClientType[] = [
-  ClientType.RETAIL,
-  ClientType.MASTER,
-  ClientType.WHOLESALE,
-];
-
-const CLIENT_CATEGORIES: ClientPricingCategory[] = [
-  ClientPricingCategory.STANDARD,
-  ClientPricingCategory.SILVER,
-  ClientPricingCategory.GOLD,
-  ClientPricingCategory.VIP,
-];
 
 async function ensureCategory(name: string) {
   const existing = await prisma.category.findUnique({ where: { name } });
@@ -105,47 +94,15 @@ async function seedCatalog() {
 }
 
 async function seedPricingStructure() {
-  const thresholdDefaults: Array<{
-    category: ClientPricingCategory;
-    minPaidAmountKgs: string;
-    maxPaidAmountKgs: string | null;
-    priority: number;
-    isActive: boolean;
-  }> = [
-    {
-      category: ClientPricingCategory.STANDARD,
-      minPaidAmountKgs: '0',
-      maxPaidAmountKgs: null,
-      priority: 1,
-      isActive: true,
-    },
-    {
-      category: ClientPricingCategory.SILVER,
-      minPaidAmountKgs: '0',
-      maxPaidAmountKgs: null,
-      priority: 2,
-      isActive: false,
-    },
-    {
-      category: ClientPricingCategory.GOLD,
-      minPaidAmountKgs: '0',
-      maxPaidAmountKgs: null,
-      priority: 3,
-      isActive: false,
-    },
-    {
-      category: ClientPricingCategory.VIP,
-      minPaidAmountKgs: '0',
-      maxPaidAmountKgs: null,
-      priority: 4,
-      isActive: false,
-    },
-  ];
-
-  for (const row of thresholdDefaults) {
+  for (const row of DEFAULT_CATEGORY_THRESHOLDS) {
     await prisma.clientCategoryThreshold.upsert({
       where: { category: row.category },
-      update: {},
+      update: {
+        minPaidAmountKgs: row.minPaidAmountKgs,
+        maxPaidAmountKgs: row.maxPaidAmountKgs,
+        priority: row.priority,
+        isActive: row.isActive,
+      },
       create: {
         category: row.category,
         minPaidAmountKgs: row.minPaidAmountKgs,
@@ -156,20 +113,21 @@ async function seedPricingStructure() {
     });
   }
 
-  for (const clientType of CLIENT_TYPES) {
-    for (const category of CLIENT_CATEGORIES) {
-      await prisma.clientTypeCategoryMarkup.upsert({
-        where: {
-          clientType_category: { clientType, category },
+  for (const row of DEFAULT_MARKUP_MATRIX) {
+    await prisma.clientTypeCategoryMarkup.upsert({
+      where: {
+        clientType_category: {
+          clientType: row.clientType,
+          category: row.category,
         },
-        update: {},
-        create: {
-          clientType,
-          category,
-          markupPercent: '0',
-        },
-      });
-    }
+      },
+      update: { markupPercent: row.markupPercent },
+      create: {
+        clientType: row.clientType,
+        category: row.category,
+        markupPercent: row.markupPercent,
+      },
+    });
   }
 }
 
