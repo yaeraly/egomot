@@ -18,10 +18,7 @@ describe('ReportsService business dates', () => {
     };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        ReportsService,
-        { provide: PrismaService, useValue: prisma },
-      ],
+      providers: [ReportsService, { provide: PrismaService, useValue: prisma }],
     }).compile();
 
     service = module.get(ReportsService);
@@ -32,18 +29,24 @@ describe('ReportsService business dates', () => {
     expect(prisma.purchase.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          purchaseDate: expect.objectContaining({ gte: expect.any(Date), lte: expect.any(Date) }),
+          purchaseDate: expect.objectContaining({
+            gte: expect.any(Date),
+            lte: expect.any(Date),
+          }),
         }),
       }),
     );
   });
 
-  it('receipt report filters by receiptDate range', async () => {
+  it('receipt report filters by warehouseReceiptDate range', async () => {
     await service.receiptReport({ from: '2026-03-01', to: '2026-03-31' });
     expect(prisma.purchaseReceipt.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          receiptDate: expect.objectContaining({ gte: expect.any(Date), lte: expect.any(Date) }),
+          warehouseReceiptDate: expect.objectContaining({
+            gte: expect.any(Date),
+            lte: expect.any(Date),
+          }),
           status: 'COMPLETED',
         }),
       }),
@@ -51,11 +54,17 @@ describe('ReportsService business dates', () => {
   });
 
   it('inventory movement report filters by transactionDate range', async () => {
-    await service.inventoryMovementReport({ from: '2026-03-01', to: '2026-03-31' });
+    await service.inventoryMovementReport({
+      from: '2026-03-01',
+      to: '2026-03-31',
+    });
     expect(prisma.inventoryMovement.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          transactionDate: expect.objectContaining({ gte: expect.any(Date), lte: expect.any(Date) }),
+          transactionDate: expect.objectContaining({
+            gte: expect.any(Date),
+            lte: expect.any(Date),
+          }),
         }),
         orderBy: [{ transactionDate: 'desc' }, { createdAt: 'desc' }],
       }),

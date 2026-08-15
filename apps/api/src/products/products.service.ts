@@ -19,6 +19,7 @@ export class ProductsService {
   private serialize(product: {
     unitWeightKg: Prisma.Decimal;
     defaultPurchasePriceCny: Prisma.Decimal | null;
+    baseMarkupPercent: Prisma.Decimal | null;
     category: { id: string; name: string; slug: string; isActive: boolean };
     [key: string]: unknown;
   }) {
@@ -27,6 +28,9 @@ export class ProductsService {
       unitWeightKg: publicDecimal(product.unitWeightKg),
       defaultPurchasePriceCny: product.defaultPurchasePriceCny
         ? publicDecimal(product.defaultPurchasePriceCny)
+        : null,
+      baseMarkupPercent: product.baseMarkupPercent
+        ? publicDecimal(product.baseMarkupPercent)
         : null,
     };
   }
@@ -93,6 +97,17 @@ export class ProductsService {
     return n;
   }
 
+  private parseOptionalMarkup(value?: string | null) {
+    if (value === undefined || value === null || value === '') return null;
+    const n = new Prisma.Decimal(value);
+    if (n.lt(0)) {
+      throw new BadRequestException(
+        'Базовая наценка не может быть отрицательной',
+      );
+    }
+    return n;
+  }
+
   async create(dto: CreateProductDto) {
     const category = await this.prisma.category.findUnique({
       where: { id: dto.categoryId },
@@ -112,7 +127,10 @@ export class ProductsService {
         categoryId: dto.categoryId,
         unit: dto.unit.trim(),
         unitWeightKg: this.parseWeight(dto.unitWeightKg),
-        defaultPurchasePriceCny: this.parseOptionalPrice(dto.defaultPurchasePriceCny),
+        defaultPurchasePriceCny: this.parseOptionalPrice(
+          dto.defaultPurchasePriceCny,
+        ),
+        baseMarkupPercent: this.parseOptionalMarkup(dto.baseMarkupPercent),
         isActive: dto.isActive ?? true,
       },
       include: { category: true },
@@ -142,9 +160,22 @@ export class ProductsService {
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
         ...(dto.categoryId !== undefined ? { categoryId: dto.categoryId } : {}),
         ...(dto.unit !== undefined ? { unit: dto.unit.trim() } : {}),
-        ...(dto.unitWeightKg !== undefined ? { unitWeightKg: this.parseWeight(dto.unitWeightKg) } : {}),
+        ...(dto.unitWeightKg !== undefined
+          ? { unitWeightKg: this.parseWeight(dto.unitWeightKg) }
+          : {}),
         ...(dto.defaultPurchasePriceCny !== undefined
-          ? { defaultPurchasePriceCny: this.parseOptionalPrice(dto.defaultPurchasePriceCny) }
+          ? {
+              defaultPurchasePriceCny: this.parseOptionalPrice(
+                dto.defaultPurchasePriceCny,
+              ),
+            }
+          : {}),
+        ...(dto.baseMarkupPercent !== undefined
+          ? {
+              baseMarkupPercent: this.parseOptionalMarkup(
+                dto.baseMarkupPercent,
+              ),
+            }
           : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
       },
@@ -172,7 +203,11 @@ export class ProductsService {
     if (!allowed.includes(ext)) {
       throw new BadRequestException('Допустимы изображения JPG, PNG или WEBP');
     }
-    const dir = join(process.cwd(), process.env.UPLOAD_DIR || 'uploads', 'products');
+    const dir = join(
+      process.cwd(),
+      process.env.UPLOAD_DIR || 'uploads',
+      'products',
+    );
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const filename = `${id}${ext}`;
     const dest = join(dir, filename);

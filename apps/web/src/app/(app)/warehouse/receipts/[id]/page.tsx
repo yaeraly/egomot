@@ -30,7 +30,7 @@ export default function ReceiptDetailPage() {
   const [transport, setTransport] = useState({ china: '', cargo: '', kg: '' });
   const [comments, setComments] = useState<Record<string, string>>({});
   const [comment, setComment] = useState('');
-  const [receiptDate, setReceiptDate] = useState('');
+  const [warehouseReceiptDate, setWarehouseReceiptDate] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -41,7 +41,7 @@ export default function ReceiptDetailPage() {
     const data = await api<PurchaseReceipt>(`/purchase-receipts/${id}`);
     setReceipt(data);
     setComment(data.comment ?? '');
-    setReceiptDate(data.receiptDate?.split('T')[0] ?? '');
+    setWarehouseReceiptDate(data.warehouseReceiptDate?.split('T')[0] ?? '');
     setTransport({
       china: data.chinaInternalTransportKgs,
       cargo: data.cargoKgs,
@@ -79,7 +79,7 @@ export default function ReceiptDetailPage() {
         method: 'PATCH',
         body: JSON.stringify({
           comment,
-          receiptDate: editable ? receiptDate : undefined,
+          warehouseReceiptDate: editable ? warehouseReceiptDate : undefined,
           transport: {
             chinaInternalTransportKgs: transport.china,
             cargoKgs: transport.cargo,
@@ -126,7 +126,7 @@ export default function ReceiptDetailPage() {
       method: 'PATCH',
       body: JSON.stringify({
         comment,
-        receiptDate,
+        warehouseReceiptDate,
         transport: {
           chinaInternalTransportKgs: transport.china,
           cargoKgs: transport.cargo,
@@ -193,11 +193,11 @@ export default function ReceiptDetailPage() {
           <p className="font-medium">{receipt.supplier?.name}</p>
         </div>
         <div>
-          <p className="text-sm text-muted">Дата поступления</p>
+          <p className="text-sm text-muted">Дата поступления на склад</p>
           {editable ? (
-            <Input type="date" className="mt-1" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} />
+            <Input type="date" className="mt-1" value={warehouseReceiptDate} onChange={(e) => setWarehouseReceiptDate(e.target.value)} />
           ) : (
-            <p>{formatBusinessDate(receipt.receiptDate)}</p>
+            <p>{formatBusinessDate(receipt.warehouseReceiptDate)}</p>
           )}
         </div>
         <div>

@@ -50,7 +50,10 @@ export class PurchaseReceiptsService {
       supplier: true,
       receivedBy: { select: { id: true, name: true, email: true, role: true } },
       items: {
-        include: { product: { include: { category: true } }, purchaseItem: true },
+        include: {
+          product: { include: { category: true } },
+          purchaseItem: true,
+        },
         orderBy: { createdAt: 'asc' as const },
       },
       discrepancies: {
@@ -86,9 +89,13 @@ export class PurchaseReceiptsService {
           unitWeightKg: String(item.unitWeightKg),
         })),
         transport: {
-          chinaInternalTransportKgs: String(params.transport.chinaInternalTransportKgs),
+          chinaInternalTransportKgs: String(
+            params.transport.chinaInternalTransportKgs,
+          ),
           cargoKgs: String(params.transport.cargoKgs),
-          kyrgyzstanInternalTransportKgs: String(params.transport.kyrgyzstanInternalTransportKgs),
+          kyrgyzstanInternalTransportKgs: String(
+            params.transport.kyrgyzstanInternalTransportKgs,
+          ),
         },
       });
     } catch (error) {
@@ -116,10 +123,14 @@ export class PurchaseReceiptsService {
     ] as const;
 
     const result: Record<string, unknown> = { ...receipt };
-    result.receiptDate = formatBusinessDate(receipt.receiptDate as Date);
+    result.warehouseReceiptDate = formatBusinessDate(
+      receipt.warehouseReceiptDate as Date,
+    );
     if (result.purchase && typeof result.purchase === 'object') {
       const purchase = result.purchase as Record<string, unknown>;
-      purchase.purchaseDate = formatBusinessDate(purchase.purchaseDate as Date | null);
+      purchase.purchaseDate = formatBusinessDate(
+        purchase.purchaseDate as Date | null,
+      );
     }
     for (const key of decimalKeys) {
       const value = receipt[key];
@@ -127,14 +138,14 @@ export class PurchaseReceiptsService {
     }
 
     if (receipt.items) {
-      result.items = (receipt.items as Array<Record<string, unknown>>).map((item) =>
-        this.serializeItem(item),
+      result.items = (receipt.items as Array<Record<string, unknown>>).map(
+        (item) => this.serializeItem(item),
       );
     }
     if (receipt.discrepancies) {
-      result.discrepancies = (receipt.discrepancies as Array<Record<string, unknown>>).map(
-        (row) => this.serializeDiscrepancy(row),
-      );
+      result.discrepancies = (
+        receipt.discrepancies as Array<Record<string, unknown>>
+      ).map((row) => this.serializeDiscrepancy(row));
     }
     return result;
   }
@@ -206,7 +217,9 @@ export class PurchaseReceiptsService {
     const activeReceipt = await this.prisma.purchaseReceipt.findFirst({
       where: {
         purchaseId,
-        status: { in: [PurchaseReceiptStatus.DRAFT, PurchaseReceiptStatus.RECEIVING] },
+        status: {
+          in: [PurchaseReceiptStatus.DRAFT, PurchaseReceiptStatus.RECEIVING],
+        },
       },
     });
     if (activeReceipt) {
@@ -233,9 +246,11 @@ export class PurchaseReceiptsService {
   private applyCalcToReceiptData(calc: ReceiptCalculation) {
     return {
       exchangeRateCnyToKgs: calc.totals.exchangeRateCnyToKgs.toFixed(6),
-      chinaInternalTransportKgs: calc.totals.chinaInternalTransportKgs.toFixed(2),
+      chinaInternalTransportKgs:
+        calc.totals.chinaInternalTransportKgs.toFixed(2),
       cargoKgs: calc.totals.cargoKgs.toFixed(2),
-      kyrgyzstanInternalTransportKgs: calc.totals.kyrgyzstanInternalTransportKgs.toFixed(2),
+      kyrgyzstanInternalTransportKgs:
+        calc.totals.kyrgyzstanInternalTransportKgs.toFixed(2),
       totalTransportKgs: calc.totals.totalTransportKgs.toFixed(2),
       totalOrderedQuantity: calc.totals.totalOrderedQuantity.toFixed(3),
       totalReceivedQuantity: calc.totals.totalReceivedQuantity.toFixed(3),
@@ -258,16 +273,26 @@ export class PurchaseReceiptsService {
       unitWeightKg: calcItem.unitWeightKg.toFixed(3),
       totalWeightKg: calcItem.totalWeightKg.toFixed(3),
       purchaseCostKgs: calcItem.purchaseCostKgs.toFixed(2),
-      allocatedChinaTransportKgs: calcItem.allocatedChinaTransportKgs.toFixed(2),
+      allocatedChinaTransportKgs:
+        calcItem.allocatedChinaTransportKgs.toFixed(2),
       allocatedCargoKgs: calcItem.allocatedCargoKgs.toFixed(2),
-      allocatedKgInternalTransportKgs: calcItem.allocatedKgInternalTransportKgs.toFixed(2),
-      totalAllocatedTransportKgs: calcItem.totalAllocatedTransportKgs.toFixed(2),
+      allocatedKgInternalTransportKgs:
+        calcItem.allocatedKgInternalTransportKgs.toFixed(2),
+      totalAllocatedTransportKgs:
+        calcItem.totalAllocatedTransportKgs.toFixed(2),
       unitLandedCostKgs: calcItem.unitLandedCostKgs.toFixed(4),
       totalLandedCostKgs: calcItem.totalLandedCostKgs.toFixed(2),
     };
   }
 
-  async list(status?: string, purchaseId?: string, search?: string, preset?: string, from?: string, to?: string) {
+  async list(
+    status?: string,
+    purchaseId?: string,
+    search?: string,
+    preset?: string,
+    from?: string,
+    to?: string,
+  ) {
     const where: Prisma.PurchaseReceiptWhereInput = {};
     if (status) where.status = status as PurchaseReceiptStatus;
     if (purchaseId) where.purchaseId = purchaseId;
@@ -281,15 +306,20 @@ export class PurchaseReceiptsService {
     }
     const range = resolveDateRange({ preset, from, to });
     if (range) {
-      where.receiptDate = businessDateRangeFilter(range.from, range.to);
+      where.warehouseReceiptDate = businessDateRangeFilter(
+        range.from,
+        range.to,
+      );
     }
 
     const rows = await this.prisma.purchaseReceipt.findMany({
       where,
       include: this.include(),
-      orderBy: [{ receiptDate: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ warehouseReceiptDate: 'desc' }, { createdAt: 'desc' }],
     });
-    return rows.map((row) => this.serializeReceipt(row as unknown as Record<string, unknown>));
+    return rows.map((row) =>
+      this.serializeReceipt(row as unknown as Record<string, unknown>),
+    );
   }
 
   async get(id: string) {
@@ -298,7 +328,7 @@ export class PurchaseReceiptsService {
       include: this.include(),
     });
     if (!receipt) throw new NotFoundException('Приход не найден');
-    return this.serializeReceipt(receipt as unknown as Record<string, unknown>);
+    return this.serializeReceipt(receipt);
   }
 
   async create(user: User, purchaseId: string, dto: CreatePurchaseReceiptDto) {
@@ -313,8 +343,11 @@ export class PurchaseReceiptsService {
     }
 
     const transport = this.transportFromPurchase(purchase);
-    const receiptDate = parseBusinessDate(dto.receiptDate, 'Дата поступления');
-    assertReceiptNotBeforePurchase(receiptDate, purchase.purchaseDate);
+    const warehouseReceiptDate = parseBusinessDate(
+      dto.warehouseReceiptDate,
+      'Дата поступления на склад',
+    );
+    assertReceiptNotBeforePurchase(warehouseReceiptDate, purchase.purchaseDate);
 
     const calc = this.runCalc({
       exchangeRateCnyToKgs: purchase.exchangeRateCnyToKgs,
@@ -334,14 +367,16 @@ export class PurchaseReceiptsService {
           number: await this.nextNumber(tx),
           purchaseId: purchase.id,
           supplierId: purchase.supplierId,
-          receiptDate,
+          warehouseReceiptDate,
           receivedByUserId: user.id,
           status: PurchaseReceiptStatus.DRAFT,
           comment: dto.comment ?? null,
           ...this.applyCalcToReceiptData(calc),
           items: {
             create: purchase.items.map((purchaseItem) => {
-              const calcItem = calc.items.find((i) => i.productId === purchaseItem.productId)!;
+              const calcItem = calc.items.find(
+                (i) => i.productId === purchaseItem.productId,
+              )!;
               return this.itemDataFromCalc(purchaseItem.id, calcItem);
             }),
           },
@@ -368,7 +403,7 @@ export class PurchaseReceiptsService {
       return created;
     });
 
-    return this.serializeReceipt(receipt as unknown as Record<string, unknown>);
+    return this.serializeReceipt(receipt);
   }
 
   async update(user: User, id: string, dto: UpdatePurchaseReceiptDto) {
@@ -381,7 +416,9 @@ export class PurchaseReceiptsService {
       throw new ForbiddenException('Завершённый приход нельзя редактировать');
     }
 
-    const itemMap = new Map(receipt.items.map((item) => [item.productId, item]));
+    const itemMap = new Map(
+      receipt.items.map((item) => [item.productId, item]),
+    );
     const updatedItems = receipt.items.map((item) => {
       const patch = dto.items?.find((row) => row.productId === item.productId);
       return {
@@ -400,7 +437,9 @@ export class PurchaseReceiptsService {
         if (!itemMap.has(patch.productId)) {
           throw new BadRequestException('Товар не принадлежит этой закупке');
         }
-        const purchaseItem = receipt.purchase.items.find((pi) => pi.productId === patch.productId);
+        const purchaseItem = receipt.purchase.items.find(
+          (pi) => pi.productId === patch.productId,
+        );
         if (!purchaseItem) {
           throw new BadRequestException('Товар не принадлежит закупке');
         }
@@ -409,10 +448,12 @@ export class PurchaseReceiptsService {
 
     const transport = {
       chinaInternalTransportKgs:
-        dto.transport?.chinaInternalTransportKgs ?? receipt.chinaInternalTransportKgs,
+        dto.transport?.chinaInternalTransportKgs ??
+        receipt.chinaInternalTransportKgs,
       cargoKgs: dto.transport?.cargoKgs ?? receipt.cargoKgs,
       kyrgyzstanInternalTransportKgs:
-        dto.transport?.kyrgyzstanInternalTransportKgs ?? receipt.kyrgyzstanInternalTransportKgs,
+        dto.transport?.kyrgyzstanInternalTransportKgs ??
+        receipt.kyrgyzstanInternalTransportKgs,
     };
 
     const calc = this.runCalc({
@@ -426,16 +467,19 @@ export class PurchaseReceiptsService {
         ? PurchaseReceiptStatus.RECEIVING
         : receipt.status;
 
-    const nextReceiptDate = dto.receiptDate
-      ? parseBusinessDate(dto.receiptDate, 'Дата поступления')
-      : receipt.receiptDate;
-    assertReceiptNotBeforePurchase(nextReceiptDate, receipt.purchase.purchaseDate);
+    const nextWarehouseReceiptDate = dto.warehouseReceiptDate
+      ? parseBusinessDate(dto.warehouseReceiptDate, 'Дата поступления на склад')
+      : receipt.warehouseReceiptDate;
+    assertReceiptNotBeforePurchase(
+      nextWarehouseReceiptDate,
+      receipt.purchase.purchaseDate,
+    );
 
     const saved = await this.prisma.$transaction(async (tx) => {
       await tx.purchaseReceipt.update({
         where: { id },
         data: {
-          receiptDate: nextReceiptDate,
+          warehouseReceiptDate: nextWarehouseReceiptDate,
           comment: dto.comment !== undefined ? dto.comment : receipt.comment,
           status: nextStatus,
           ...this.applyCalcToReceiptData(calc),
@@ -450,7 +494,9 @@ export class PurchaseReceiptsService {
         });
       }
 
-      await tx.purchaseReceiptDiscrepancy.deleteMany({ where: { receiptId: id } });
+      await tx.purchaseReceiptDiscrepancy.deleteMany({
+        where: { receiptId: id },
+      });
       if (calc.discrepancies.length > 0) {
         await tx.purchaseReceiptDiscrepancy.createMany({
           data: calc.discrepancies.map((d) => ({
@@ -459,8 +505,10 @@ export class PurchaseReceiptsService {
             orderedQuantity: d.orderedQuantity.toFixed(3),
             receivedQuantity: d.receivedQuantity.toFixed(3),
             difference: d.difference.toFixed(3),
-            type: d.type as ReceiptDiscrepancyType,
-            comment: dto.items?.find((i) => i.productId === d.productId)?.comment ?? null,
+            type: d.type,
+            comment:
+              dto.items?.find((i) => i.productId === d.productId)?.comment ??
+              null,
           })),
         });
       }
@@ -475,7 +523,8 @@ export class PurchaseReceiptsService {
           newValue: {
             status: nextStatus,
             totals: {
-              totalReceivedQuantity: calc.totals.totalReceivedQuantity.toFixed(3),
+              totalReceivedQuantity:
+                calc.totals.totalReceivedQuantity.toFixed(3),
               totalDifference: calc.totals.totalDifference.toFixed(3),
               totalLandedCostKgs: calc.totals.totalLandedCostKgs.toFixed(2),
             },
@@ -483,7 +532,10 @@ export class PurchaseReceiptsService {
         },
       });
 
-      return tx.purchaseReceipt.findUnique({ where: { id }, include: this.include() });
+      return tx.purchaseReceipt.findUnique({
+        where: { id },
+        include: this.include(),
+      });
     });
 
     return this.serializeReceipt(saved as unknown as Record<string, unknown>);
@@ -494,7 +546,7 @@ export class PurchaseReceiptsService {
     const calc = this.runCalc({
       exchangeRateCnyToKgs: receipt.exchangeRateCnyToKgs as string,
       items: (receipt.items as Array<Record<string, string>>).map((item) => ({
-        productId: item.productId as string,
+        productId: item.productId,
         orderedQuantity: item.orderedQuantity,
         receivedQuantity: item.receivedQuantity,
         unitPriceCny: item.unitPriceCny,
@@ -503,7 +555,8 @@ export class PurchaseReceiptsService {
       transport: {
         chinaInternalTransportKgs: receipt.chinaInternalTransportKgs as string,
         cargoKgs: receipt.cargoKgs as string,
-        kyrgyzstanInternalTransportKgs: receipt.kyrgyzstanInternalTransportKgs as string,
+        kyrgyzstanInternalTransportKgs:
+          receipt.kyrgyzstanInternalTransportKgs as string,
       },
     });
 
@@ -519,7 +572,8 @@ export class PurchaseReceiptsService {
         purchaseCostKgs: item.purchaseCostKgs.toFixed(2),
         allocatedChinaTransportKgs: item.allocatedChinaTransportKgs.toFixed(2),
         allocatedCargoKgs: item.allocatedCargoKgs.toFixed(2),
-        allocatedKgInternalTransportKgs: item.allocatedKgInternalTransportKgs.toFixed(2),
+        allocatedKgInternalTransportKgs:
+          item.allocatedKgInternalTransportKgs.toFixed(2),
         totalAllocatedTransportKgs: item.totalAllocatedTransportKgs.toFixed(2),
         unitLandedCostKgs: item.unitLandedCostKgs.toFixed(4),
         totalLandedCostKgs: item.totalLandedCostKgs.toFixed(2),
@@ -537,9 +591,11 @@ export class PurchaseReceiptsService {
         totalDifference: calc.totals.totalDifference.toFixed(3),
         totalShortage: calc.totals.totalShortage.toFixed(3),
         totalExcess: calc.totals.totalExcess.toFixed(3),
-        chinaInternalTransportKgs: calc.totals.chinaInternalTransportKgs.toFixed(2),
+        chinaInternalTransportKgs:
+          calc.totals.chinaInternalTransportKgs.toFixed(2),
         cargoKgs: calc.totals.cargoKgs.toFixed(2),
-        kyrgyzstanInternalTransportKgs: calc.totals.kyrgyzstanInternalTransportKgs.toFixed(2),
+        kyrgyzstanInternalTransportKgs:
+          calc.totals.kyrgyzstanInternalTransportKgs.toFixed(2),
         totalTransportKgs: calc.totals.totalTransportKgs.toFixed(2),
         totalLandedCostKgs: calc.totals.totalLandedCostKgs.toFixed(2),
         totalWeightKg: calc.totals.totalWeightKg.toFixed(3),
@@ -582,13 +638,21 @@ export class PurchaseReceiptsService {
     });
 
     if (calc.totals.totalReceivedQuantity.lte(0)) {
-      throw new BadRequestException('Укажите фактическое количество хотя бы для одного товара');
+      throw new BadRequestException(
+        'Укажите фактическое количество хотя бы для одного товара',
+      );
     }
 
-    assertReceiptNotBeforePurchase(receipt.receiptDate, receipt.purchase.purchaseDate);
+    assertReceiptNotBeforePurchase(
+      receipt.warehouseReceiptDate,
+      receipt.purchase.purchaseDate,
+    );
 
     const commentMap = new Map(
-      (dto.discrepancyComments ?? []).map((row) => [row.productId, row.comment ?? null]),
+      (dto.discrepancyComments ?? []).map((row) => [
+        row.productId,
+        row.comment ?? null,
+      ]),
     );
 
     const completed = await this.prisma.$transaction(async (tx) => {
@@ -605,7 +669,9 @@ export class PurchaseReceiptsService {
         });
       }
 
-      await tx.purchaseReceiptDiscrepancy.deleteMany({ where: { receiptId: id } });
+      await tx.purchaseReceiptDiscrepancy.deleteMany({
+        where: { receiptId: id },
+      });
       if (calc.discrepancies.length > 0) {
         await tx.purchaseReceiptDiscrepancy.createMany({
           data: calc.discrepancies.map((d) => ({
@@ -614,7 +680,7 @@ export class PurchaseReceiptsService {
             orderedQuantity: d.orderedQuantity.toFixed(3),
             receivedQuantity: d.receivedQuantity.toFixed(3),
             difference: d.difference.toFixed(3),
-            type: d.type as ReceiptDiscrepancyType,
+            type: d.type,
             comment: commentMap.get(d.productId) ?? null,
           })),
         });
@@ -628,8 +694,12 @@ export class PurchaseReceiptsService {
         });
 
         const inventoryUpdate = computeInventoryAfterReceipt({
-          currentQuantity: existing?.quantity != null ? String(existing.quantity) : 0,
-          currentTotalValueKgs: existing?.totalValueKgs != null ? String(existing.totalValueKgs) : 0,
+          currentQuantity:
+            existing?.quantity != null ? String(existing.quantity) : 0,
+          currentTotalValueKgs:
+            existing?.totalValueKgs != null
+              ? String(existing.totalValueKgs)
+              : 0,
           receivedQuantity: calcItem.receivedQuantity.toFixed(3),
           unitLandedCostKgs: calcItem.unitLandedCostKgs.toFixed(4),
         });
@@ -666,7 +736,7 @@ export class PurchaseReceiptsService {
             referenceType: InventoryReferenceType.PURCHASE_RECEIPT,
             referenceId: id,
             userId: user.id,
-            transactionDate: receipt.receiptDate,
+            transactionDate: receipt.warehouseReceiptDate,
           },
         });
 
@@ -722,7 +792,8 @@ export class PurchaseReceiptsService {
             receiptNumber: receipt.number,
             confirmation: {
               totalOrderedQuantity: calc.totals.totalOrderedQuantity.toFixed(3),
-              totalReceivedQuantity: calc.totals.totalReceivedQuantity.toFixed(3),
+              totalReceivedQuantity:
+                calc.totals.totalReceivedQuantity.toFixed(3),
               totalShortage: calc.totals.totalShortage.toFixed(3),
               totalExcess: calc.totals.totalExcess.toFixed(3),
               totalTransportKgs: calc.totals.totalTransportKgs.toFixed(2),
@@ -736,11 +807,13 @@ export class PurchaseReceiptsService {
       return done;
     });
 
-    return this.serializeReceipt(completed as unknown as Record<string, unknown>);
+    return this.serializeReceipt(completed);
   }
 
   async cancel(user: User, id: string) {
-    const receipt = await this.prisma.purchaseReceipt.findUnique({ where: { id } });
+    const receipt = await this.prisma.purchaseReceipt.findUnique({
+      where: { id },
+    });
     if (!receipt) throw new NotFoundException('Приход не найден');
     if (receipt.status === PurchaseReceiptStatus.COMPLETED) {
       throw new BadRequestException('Завершённый приход нельзя отменить');
@@ -770,7 +843,7 @@ export class PurchaseReceiptsService {
       return updated;
     });
 
-    return this.serializeReceipt(saved as unknown as Record<string, unknown>);
+    return this.serializeReceipt(saved);
   }
 }
 

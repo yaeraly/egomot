@@ -38,7 +38,7 @@ export class ReceiptTransportDto {
 
 export class CreatePurchaseReceiptDto {
   @IsDateString()
-  receiptDate!: string;
+  warehouseReceiptDate!: string;
 
   @IsOptional()
   @IsString()
@@ -48,7 +48,7 @@ export class CreatePurchaseReceiptDto {
 export class UpdatePurchaseReceiptDto {
   @IsOptional()
   @IsDateString()
-  receiptDate?: string;
+  warehouseReceiptDate?: string;
 
   @IsOptional()
   @IsString()

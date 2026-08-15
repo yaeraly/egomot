@@ -19,7 +19,7 @@ describe('business dates', () => {
         parseBusinessDate('2026-03-04'),
         parseBusinessDate('2026-03-05'),
       ),
-    ).toThrow('Дата поступления не может быть раньше даты закупки.');
+    ).toThrow('Дата поступления на склад не может быть раньше даты закупки.');
   });
 
   it('allows receipt on or after purchase date', () => {
@@ -44,7 +44,10 @@ describe('business dates', () => {
   });
 
   it('March transaction is in March custom report range', () => {
-    const marchRange = resolveDateRange({ from: '2026-03-01', to: '2026-03-31' })!;
+    const marchRange = resolveDateRange({
+      from: '2026-03-01',
+      to: '2026-03-31',
+    })!;
     const march = parseBusinessDate('2026-03-05').getTime();
     expect(march).toBeGreaterThanOrEqual(marchRange.from.getTime());
     expect(march).toBeLessThanOrEqual(marchRange.to.getTime());

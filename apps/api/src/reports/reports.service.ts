@@ -40,7 +40,9 @@ export class ReportsService {
         totalQuantity: publicDecimal(row.totalQuantity),
         totalPurchaseCny: publicDecimal(row.totalPurchaseCny),
         totalLogisticsKgs: publicDecimal(row.totalLogisticsKgs),
-        estimatedTotalLandedCostKgs: publicDecimal(row.estimatedTotalLandedCostKgs),
+        estimatedTotalLandedCostKgs: publicDecimal(
+          row.estimatedTotalLandedCostKgs,
+        ),
         status: row.status,
         createdAt: row.createdAt.toISOString(),
       })),
@@ -51,7 +53,7 @@ export class ReportsService {
     const range = this.resolveRange(query);
     const rows = await this.prisma.purchaseReceipt.findMany({
       where: {
-        receiptDate: businessDateRangeFilter(range.from, range.to),
+        warehouseReceiptDate: businessDateRangeFilter(range.from, range.to),
         status: 'COMPLETED',
       },
       include: {
@@ -60,7 +62,7 @@ export class ReportsService {
         receivedBy: { select: { id: true, name: true } },
         discrepancies: true,
       },
-      orderBy: [{ receiptDate: 'desc' }, { number: 'desc' }],
+      orderBy: [{ warehouseReceiptDate: 'desc' }, { number: 'desc' }],
     });
 
     return {
@@ -68,13 +70,16 @@ export class ReportsService {
       rows: rows.map((row) => {
         const shortage = row.discrepancies
           .filter((d) => d.type === 'SHORTAGE')
-          .reduce((sum, d) => sum.plus(d.difference.abs()), new Prisma.Decimal(0));
+          .reduce(
+            (sum, d) => sum.plus(d.difference.abs()),
+            new Prisma.Decimal(0),
+          );
         const excess = row.discrepancies
           .filter((d) => d.type === 'EXCESS')
           .reduce((sum, d) => sum.plus(d.difference), new Prisma.Decimal(0));
 
         return {
-          receiptDate: formatBusinessDate(row.receiptDate),
+          warehouseReceiptDate: formatBusinessDate(row.warehouseReceiptDate),
           purchaseNumber: row.purchase.number,
           purchaseDate: formatBusinessDate(row.purchase.purchaseDate),
           supplierName: row.supplier.name,
@@ -134,7 +139,13 @@ export class ReportsService {
       }),
       this.prisma.inventoryMovement.findMany({
         where: { transactionDate: null },
-        select: { id: true, type: true, createdAt: true, referenceType: true, referenceId: true },
+        select: {
+          id: true,
+          type: true,
+          createdAt: true,
+          referenceType: true,
+          referenceId: true,
+        },
         orderBy: { createdAt: 'desc' },
       }),
     ]);
@@ -158,8 +169,7 @@ export class ReportsService {
       summary: {
         purchasesWithoutDate: purchases.length,
         movementsWithoutTransactionDate: movements.length,
-        note:
-          'Существующие приходы сохранили receiptDate при переименовании arrivalDate. Проверьте и при необходимости исправьте исторические даты вручную.',
+        note: 'Существующие приходы сохранили warehouseReceiptDate при переименовании. Проверьте и при необходимости исправьте исторические даты вручную.',
       },
     };
   }

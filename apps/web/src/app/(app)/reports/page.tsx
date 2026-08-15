@@ -22,7 +22,7 @@ interface PurchaseReportRow {
 }
 
 interface ReceiptReportRow {
-  receiptDate: string | null;
+  warehouseReceiptDate: string | null;
   purchaseNumber: string;
   purchaseDate: string | null;
   supplierName: string;
@@ -180,7 +180,7 @@ export default function ReportsPage() {
                     <p className="font-semibold">{row.number}</p>
                     <p className="text-sm text-muted">{row.purchaseNumber} · {row.supplierName}</p>
                   </div>
-                  <p className="text-sm">{formatBusinessDate(row.receiptDate)}</p>
+                  <p className="text-sm">{formatBusinessDate(row.warehouseReceiptDate)}</p>
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
                   <div><p className="text-muted">Заказано</p><p>{qty(row.totalOrderedQuantity)}</p></div>

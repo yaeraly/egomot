@@ -10,6 +10,7 @@ const NAV = [
   { href: '/', label: 'Dashboard', icon: HomeIcon },
   { href: '/products', label: 'Товары', icon: BoxIcon },
   { href: '/suppliers', label: 'Поставщики', icon: UsersIcon },
+  { href: '/clients', label: 'Клиенты', icon: ClientIcon },
   { href: '/purchases', label: 'Закупки', icon: CartIcon },
   { href: '/reports', label: 'Отчёты', icon: ReportIcon },
   { href: '/settings', label: 'Настройки', icon: CogIcon },
@@ -44,6 +45,14 @@ function UsersIcon() {
       <path d="M3 19a6 6 0 0 1 12 0" />
       <circle cx="17" cy="9" r="2.5" />
       <path d="M16 19a5 5 0 0 1 5-4" />
+    </svg>
+  );
+}
+function ClientIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20a7 7 0 0 1 14 0" />
     </svg>
   );
 }
@@ -105,7 +114,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const nav = (
     <nav className="flex flex-col gap-1">
-      {NAV.slice(0, 5).map((item) => {
+      {NAV.slice(0, 6).map((item) => {
         const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
         const Icon = item.icon;
         return (
@@ -155,7 +164,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         ) : null}
       </div>
 
-      {NAV.slice(5).map((item) => {
+      {NAV.slice(6).map((item) => {
         const active = pathname.startsWith(item.href);
         const Icon = item.icon;
         return (

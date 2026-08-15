@@ -32,8 +32,8 @@ export default function WarehouseMovementsPage() {
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
                 <div>
-                  <p className="text-muted">Тип</p>
-                  <p>{row.type === 'PURCHASE_RECEIPT' ? 'Приход' : row.type}</p>
+                  <p className="text-muted">Дата поступления на склад</p>
+                  <p>{formatBusinessDate(row.transactionDate)}</p>
                 </div>
                 <div>
                   <p className="text-muted">Количество</p>

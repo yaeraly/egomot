@@ -1,4 +1,9 @@
-import { PrismaClient, UserRole } from '@prisma/client';
+import {
+  ClientPricingCategory,
+  ClientType,
+  PrismaClient,
+  UserRole,
+} from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { slugifyCategoryName, uniqueCategorySlug } from '../src/common/slug.util';
 import {
@@ -7,6 +12,19 @@ import {
 } from './catalog-data';
 
 const prisma = new PrismaClient();
+
+const CLIENT_TYPES: ClientType[] = [
+  ClientType.RETAIL,
+  ClientType.MASTER,
+  ClientType.WHOLESALE,
+];
+
+const CLIENT_CATEGORIES: ClientPricingCategory[] = [
+  ClientPricingCategory.STANDARD,
+  ClientPricingCategory.SILVER,
+  ClientPricingCategory.GOLD,
+  ClientPricingCategory.VIP,
+];
 
 async function ensureCategory(name: string) {
   const existing = await prisma.category.findUnique({ where: { name } });
@@ -86,6 +104,75 @@ async function seedCatalog() {
   }
 }
 
+async function seedPricingStructure() {
+  const thresholdDefaults: Array<{
+    category: ClientPricingCategory;
+    minPaidAmountKgs: string;
+    maxPaidAmountKgs: string | null;
+    priority: number;
+    isActive: boolean;
+  }> = [
+    {
+      category: ClientPricingCategory.STANDARD,
+      minPaidAmountKgs: '0',
+      maxPaidAmountKgs: null,
+      priority: 1,
+      isActive: true,
+    },
+    {
+      category: ClientPricingCategory.SILVER,
+      minPaidAmountKgs: '0',
+      maxPaidAmountKgs: null,
+      priority: 2,
+      isActive: false,
+    },
+    {
+      category: ClientPricingCategory.GOLD,
+      minPaidAmountKgs: '0',
+      maxPaidAmountKgs: null,
+      priority: 3,
+      isActive: false,
+    },
+    {
+      category: ClientPricingCategory.VIP,
+      minPaidAmountKgs: '0',
+      maxPaidAmountKgs: null,
+      priority: 4,
+      isActive: false,
+    },
+  ];
+
+  for (const row of thresholdDefaults) {
+    await prisma.clientCategoryThreshold.upsert({
+      where: { category: row.category },
+      update: {},
+      create: {
+        category: row.category,
+        minPaidAmountKgs: row.minPaidAmountKgs,
+        maxPaidAmountKgs: row.maxPaidAmountKgs,
+        priority: row.priority,
+        isActive: row.isActive,
+      },
+    });
+  }
+
+  for (const clientType of CLIENT_TYPES) {
+    for (const category of CLIENT_CATEGORIES) {
+      await prisma.clientTypeCategoryMarkup.upsert({
+        where: {
+          clientType_category: { clientType, category },
+        },
+        update: {},
+        create: {
+          clientType,
+          category,
+          markupPercent: '0',
+        },
+      });
+    }
+  }
+}
+
 async function verifyCatalog() {
   const catalogCategoryCount = await prisma.category.count({
     where: { name: { in: [...CATALOG_CATEGORY_NAMES] } },
@@ -108,11 +195,12 @@ async function main() {
   console.log(`Owner ready: ${process.env.OWNER_EMAIL ?? 'owner@egomot.local'} (${ownerCount} OWNER user(s))`);
   await backfillCategorySlugs();
   await seedCatalog();
+  await seedPricingStructure();
   await verifyCatalog();
 
   // eslint-disable-next-line no-console
   console.log(
-    `Seed complete: ${CATALOG_CATEGORY_NAMES.length} catalog categories, ${CATALOG_PRODUCTS.length} catalog products`,
+    `Seed complete: ${CATALOG_CATEGORY_NAMES.length} catalog categories, ${CATALOG_PRODUCTS.length} catalog products, pricing structure initialized`,
   );
 }
 

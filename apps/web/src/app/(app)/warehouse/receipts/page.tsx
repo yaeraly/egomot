@@ -88,7 +88,7 @@ export default function WarehouseReceiptsPage() {
                 </div>
                 <div>
                   <p className="text-muted">Дата</p>
-                  <p>{formatBusinessDate(row.receiptDate)}</p>
+                  <p>{formatBusinessDate(row.warehouseReceiptDate)}</p>
                 </div>
               </div>
             </Link>

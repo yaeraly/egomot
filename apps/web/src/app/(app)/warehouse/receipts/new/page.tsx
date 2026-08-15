@@ -23,7 +23,7 @@ export default function NewReceiptPage() {
   const presetPurchaseId = params.get('purchaseId') ?? '';
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [purchaseId, setPurchaseId] = useState(presetPurchaseId);
-  const [receiptDate, setReceiptDate] = useState(todayInputValue());
+  const [warehouseReceiptDate, setWarehouseReceiptDate] = useState(todayInputValue());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,7 +47,7 @@ export default function NewReceiptPage() {
     try {
       const receipt = await api<{ id: string }>(`/purchases/${purchaseId}/receipts`, {
         method: 'POST',
-        body: JSON.stringify({ receiptDate }),
+        body: JSON.stringify({ warehouseReceiptDate }),
       });
       router.push(`/warehouse/receipts/${receipt.id}`);
     } catch (e) {
@@ -69,8 +69,8 @@ export default function NewReceiptPage() {
         />
       ) : (
         <Card className="space-y-4">
-          <Field label="Дата поступления *">
-            <Input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} />
+          <Field label="Дата поступления на склад *">
+            <Input type="date" value={warehouseReceiptDate} onChange={(e) => setWarehouseReceiptDate(e.target.value)} />
           </Field>
           <Field label="Закупка">
             <Select value={purchaseId} onChange={(e) => setPurchaseId(e.target.value)}>

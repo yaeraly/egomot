@@ -16,6 +16,7 @@ export function ProductForm({ product }: { product?: Product }) {
   const [defaultPurchasePriceCny, setDefaultPurchasePriceCny] = useState(
     product?.defaultPurchasePriceCny ?? '',
   );
+  const [baseMarkupPercent, setBaseMarkupPercent] = useState(product?.baseMarkupPercent ?? '');
   const [isActive, setIsActive] = useState(product?.isActive ?? true);
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +41,7 @@ export function ProductForm({ product }: { product?: Product }) {
         unit,
         unitWeightKg,
         defaultPurchasePriceCny: defaultPurchasePriceCny || null,
+        baseMarkupPercent: baseMarkupPercent || null,
         isActive,
       };
       const saved = product
@@ -78,6 +80,9 @@ export function ProductForm({ product }: { product?: Product }) {
       </div>
       <Field label="Цена закупки, CNY">
         <Input inputMode="decimal" value={defaultPurchasePriceCny} onChange={(e) => setDefaultPurchasePriceCny(e.target.value)} />
+      </Field>
+      <Field label="Базовая наценка, %" hint="Наценка товара для расчёта цены продажи">
+        <Input inputMode="decimal" value={baseMarkupPercent} onChange={(e) => setBaseMarkupPercent(e.target.value)} />
       </Field>
       <Field label="Фото" hint="Необязательно, JPG/PNG/WEBP до 5 МБ">
         <Input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />

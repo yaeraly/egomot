@@ -51,6 +51,7 @@ export interface Product {
   imageUrl: string | null;
   unitWeightKg: string;
   defaultPurchasePriceCny: string | null;
+  baseMarkupPercent: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -240,7 +241,7 @@ export interface PurchaseReceipt {
   purchase?: Purchase;
   supplierId: string;
   supplier?: Supplier;
-  receiptDate: string;
+  warehouseReceiptDate: string;
   receivedByUserId: string;
   receivedBy?: AuthUser;
   status: PurchaseReceiptStatus;
@@ -311,3 +312,88 @@ export const LOGISTICS_LABELS: Record<LogisticsType, string> = {
 };
 
 export const UNITS = ['шт', 'кг', 'кор', 'пар', 'набор', 'уп', 'м'];
+
+export type ClientType = 'RETAIL' | 'MASTER' | 'WHOLESALE';
+
+export type ClientPricingCategory = 'STANDARD' | 'SILVER' | 'GOLD' | 'VIP';
+
+export interface Client {
+  id: string;
+  name: string;
+  companyName: string | null;
+  phone: string;
+  email: string | null;
+  address: string | null;
+  city: string | null;
+  notes: string | null;
+  clientType: ClientType;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ClientPricingInfo {
+  clientType: ClientType;
+  clientCategory: ClientPricingCategory;
+  clientTypeLabel: string;
+  clientCategoryLabel: string;
+  paidPurchaseAmount90DaysKgs: string;
+  additionalMarkupPercent: string;
+  nextCategory: ClientPricingCategory | null;
+  nextCategoryLabel: string | null;
+  amountRemainingToNextCategoryKgs: string | null;
+}
+
+export interface ClientCard {
+  client: Client;
+  pricing: ClientPricingInfo;
+}
+
+export interface CategoryThreshold {
+  id: string;
+  category: ClientPricingCategory;
+  minPaidAmountKgs: string;
+  maxPaidAmountKgs: string | null;
+  priority: number;
+  isActive: boolean;
+}
+
+export interface MarkupMatrixCell {
+  id: string;
+  clientType: ClientType;
+  category: ClientPricingCategory;
+  markupPercent: string;
+}
+
+export interface PricingSettings {
+  thresholds: CategoryThreshold[];
+  markupMatrix: MarkupMatrixCell[];
+}
+
+export interface PriceCalculation {
+  productId: string;
+  clientId: string;
+  costPriceKgs: string;
+  baseMarkupPercent: string;
+  clientMarkupPercent: string;
+  finalMarkupPercent: string;
+  finalPriceKgs: string;
+  clientType: ClientType;
+  clientCategory: ClientPricingCategory;
+  paidPurchaseAmount90DaysKgs: string;
+  nextCategory: ClientPricingCategory | null;
+  amountRemainingToNextCategoryKgs: string | null;
+}
+
+export const CLIENT_TYPE_LABELS: Record<ClientType, string> = {
+  RETAIL: 'Розничный',
+  MASTER: 'Мастер',
+  WHOLESALE: 'Оптовый',
+};
+
+export const CLIENT_CATEGORY_LABELS: Record<ClientPricingCategory, string> = {
+  STANDARD: 'Standard',
+  SILVER: 'Silver',
+  GOLD: 'Gold',
+  VIP: 'VIP',
+};

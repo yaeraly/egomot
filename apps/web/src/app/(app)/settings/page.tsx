@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import { AuthUser } from '@/lib/types';
@@ -51,6 +52,12 @@ export default function SettingsPage() {
   return (
     <div>
       <PageHeader title="Настройки" subtitle="Профиль владельца" />
+      <Card className="mb-4">
+        <Link href="/settings/pricing" className="flex min-h-12 items-center justify-between rounded-xl border border-line px-4 font-medium hover:bg-page">
+          <span>Ценообразование</span>
+          <span className="text-muted">→</span>
+        </Link>
+      </Card>
       <Card>
         <form onSubmit={onSubmit} className="space-y-4">
           <p className="text-sm text-muted">{user?.email} · {user?.role}</p>

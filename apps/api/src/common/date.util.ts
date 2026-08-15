@@ -45,7 +45,9 @@ export function parseBusinessDate(value: string, fieldLabel = 'Дата'): Date 
   return date;
 }
 
-export function formatBusinessDate(value: Date | string | null | undefined): string | null {
+export function formatBusinessDate(
+  value: Date | string | null | undefined,
+): string | null {
   if (!value) return null;
   const date = typeof value === 'string' ? new Date(value) : value;
   const y = date.getUTCFullYear();
@@ -55,21 +57,38 @@ export function formatBusinessDate(value: Date | string | null | undefined): str
 }
 
 export function startOfUtcDay(date: Date): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
 }
 
 export function endOfUtcDay(date: Date): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999));
+  return new Date(
+    Date.UTC(
+      date.getUTCFullYear(),
+      date.getUTCMonth(),
+      date.getUTCDate(),
+      23,
+      59,
+      59,
+      999,
+    ),
+  );
 }
 
 export function compareBusinessDates(a: Date, b: Date): number {
   return startOfUtcDay(a).getTime() - startOfUtcDay(b).getTime();
 }
 
-export function assertReceiptNotBeforePurchase(receiptDate: Date, purchaseDate: Date | null) {
+export function assertReceiptNotBeforePurchase(
+  warehouseReceiptDate: Date,
+  purchaseDate: Date | null,
+) {
   if (!purchaseDate) return;
-  if (compareBusinessDates(receiptDate, purchaseDate) < 0) {
-    throw new BadRequestException('Дата поступления не может быть раньше даты закупки.');
+  if (compareBusinessDates(warehouseReceiptDate, purchaseDate) < 0) {
+    throw new BadRequestException(
+      'Дата поступления на склад не может быть раньше даты закупки.',
+    );
   }
 }
 
@@ -113,11 +132,17 @@ export function resolveDateRange(params: {
         break;
       }
       case 'month':
-        from = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+        from = new Date(
+          Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1),
+        );
         break;
       case 'prev_month': {
-        from = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1));
-        to = endOfUtcDay(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 0)));
+        from = new Date(
+          Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1),
+        );
+        to = endOfUtcDay(
+          new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 0)),
+        );
         break;
       }
       case 'quarter': {
@@ -145,7 +170,9 @@ export function resolveDateRange(params: {
     const from = startOfUtcDay(parseBusinessDate(params.from, 'Дата начала'));
     const to = endOfUtcDay(parseBusinessDate(params.to, 'Дата окончания'));
     if (from.getTime() > to.getTime()) {
-      throw new BadRequestException('Дата начала не может быть позже даты окончания');
+      throw new BadRequestException(
+        'Дата начала не может быть позже даты окончания',
+      );
     }
     return {
       preset: 'custom',

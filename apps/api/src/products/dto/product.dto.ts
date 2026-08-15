@@ -30,6 +30,10 @@ export class CreateProductDto {
   defaultPurchasePriceCny?: string | null;
 
   @IsOptional()
+  @IsString()
+  baseMarkupPercent?: string | null;
+
+  @IsOptional()
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   isActive?: boolean;
@@ -59,6 +63,10 @@ export class UpdateProductDto {
   @IsOptional()
   @IsString()
   defaultPurchasePriceCny?: string | null;
+
+  @IsOptional()
+  @IsString()
+  baseMarkupPercent?: string | null;
 
   @IsOptional()
   @Transform(({ value }) => value === true || value === 'true')

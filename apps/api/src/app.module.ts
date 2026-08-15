@@ -10,6 +10,9 @@ import { PurchaseReceiptsModule } from './purchase-receipts/purchase-receipts.mo
 import { PurchasesModule } from './purchases/purchases.module';
 import { ReportsModule } from './reports/reports.module';
 import { SettingsModule } from './settings/settings.module';
+import { ClientsModule } from './clients/clients.module';
+import { PricingModule } from './pricing/pricing.module';
+import { SalesModule } from './sales/sales.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 
 @Module({
@@ -26,6 +29,9 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     ReportsModule,
     DashboardModule,
     SettingsModule,
+    ClientsModule,
+    PricingModule,
+    SalesModule,
   ],
 })
 export class AppModule {}
