@@ -81,6 +81,32 @@ export class ProductsService {
     return this.serialize(product);
   }
 
+  async listPurchasePriceHistory(id: string) {
+    await this.get(id);
+    const rows = await this.prisma.productPurchasePriceHistory.findMany({
+      where: { productId: id },
+      include: {
+        purchase: { select: { id: true, number: true } },
+        changedBy: { select: { id: true, name: true } },
+      },
+      orderBy: { changedAt: 'desc' },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      previousPriceCny: row.previousPriceCny
+        ? publicDecimal(row.previousPriceCny)
+        : null,
+      newPriceCny: publicDecimal(row.newPriceCny),
+      changedAt: row.changedAt.toISOString(),
+      purchase: row.purchase
+        ? { id: row.purchase.id, number: row.purchase.number }
+        : null,
+      changedBy: row.changedBy
+        ? { id: row.changedBy.id, name: row.changedBy.name }
+        : null,
+    }));
+  }
+
   private parseWeight(value: string) {
     const n = new Prisma.Decimal(value);
     if (n.lt(0)) {

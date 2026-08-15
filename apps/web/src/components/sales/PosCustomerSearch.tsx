@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { Client, CLIENT_TYPE_LABELS } from '@/lib/types';
 import { Button, Field, SearchBox, cn } from '@/components/ui';
 

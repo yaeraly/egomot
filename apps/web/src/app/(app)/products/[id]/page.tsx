@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api, assetUrl } from '@/lib/api';
 import { money, weight } from '@/lib/format';
-import { Client, PriceCalculation, Product } from '@/lib/types';
+import { Client, PriceCalculation, Product, ProductPurchasePriceHistoryEntry } from '@/lib/types';
 import { PriceBreakdown } from '@/components/PriceBreakdown';
 import { Badge, Button, Card, Field, PageHeader, Select } from '@/components/ui';
 
@@ -16,10 +16,12 @@ export default function ProductViewPage() {
   const [clientId, setClientId] = useState('');
   const [price, setPrice] = useState<PriceCalculation | null>(null);
   const [priceError, setPriceError] = useState<string | null>(null);
+  const [priceHistory, setPriceHistory] = useState<ProductPurchasePriceHistoryEntry[]>([]);
 
   useEffect(() => {
     void api<Product>(`/products/${id}`).then(setProduct);
     void api<Client[]>('/clients?active=true').then(setClients);
+    void api<ProductPurchasePriceHistoryEntry[]>(`/products/${id}/purchase-price-history`).then(setPriceHistory);
   }, [id]);
 
   async function calculatePrice() {
@@ -66,13 +68,57 @@ export default function ProductViewPage() {
         </div>
         <p>Единица: {product.unit}</p>
         <p>Вес: {weight(product.unitWeightKg)}</p>
-        <p>Цена CNY: {product.defaultPurchasePriceCny ? money(product.defaultPurchasePriceCny, 'CNY') : '—'}</p>
+        <p>Цена закупки (CNY): {product.defaultPurchasePriceCny ? money(product.defaultPurchasePriceCny, 'CNY') : '—'}</p>
         <p>Базовая наценка: {product.baseMarkupPercent ? `${product.baseMarkupPercent}%` : '—'}</p>
         {product.isActive ? (
           <Button variant="secondary" onClick={() => void deactivate()}>
             Деактивировать
           </Button>
         ) : null}
+      </Card>
+
+      <Card className="mb-4 space-y-3">
+        <h2 className="font-semibold">История цен закупки (CNY)</h2>
+        {priceHistory.length === 0 ? (
+          <p className="text-sm text-muted">Изменений через закупки пока не было.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b border-line text-left text-muted">
+                  <th className="py-2 pr-3">Дата</th>
+                  <th className="py-2 pr-3">Было</th>
+                  <th className="py-2 pr-3">Стало</th>
+                  <th className="py-2 pr-3">Закупка</th>
+                </tr>
+              </thead>
+              <tbody>
+                {priceHistory.map((row) => (
+                  <tr key={row.id} className="border-b border-line last:border-b-0">
+                    <td className="py-2 pr-3">
+                      {new Date(row.changedAt).toLocaleString('ru-RU')}
+                    </td>
+                    <td className="py-2 pr-3">
+                      {row.previousPriceCny ? money(row.previousPriceCny, 'CNY') : '—'}
+                    </td>
+                    <td className="py-2 pr-3 font-medium">
+                      {money(row.newPriceCny, 'CNY')}
+                    </td>
+                    <td className="py-2 pr-3">
+                      {row.purchase ? (
+                        <Link href={`/purchases/${row.purchase.id}`} className="text-brand">
+                          {row.purchase.number}
+                        </Link>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
 
       <Card className="space-y-4">

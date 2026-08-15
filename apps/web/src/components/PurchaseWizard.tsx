@@ -378,7 +378,7 @@ export function PurchaseWizard({ purchase }: { purchase?: Purchase }) {
                     }
                   />
                 </Field>
-                <Field label="Цена, CNY">
+                <Field label="Цена закупки, ¥">
                   <Input
                     inputMode="decimal"
                     value={item.unitPriceCny}
@@ -387,6 +387,7 @@ export function PurchaseWizard({ purchase }: { purchase?: Purchase }) {
                         prev.map((x) => (x.productId === item.productId ? { ...x, unitPriceCny: e.target.value } : x)),
                       )
                     }
+                    placeholder="85"
                   />
                 </Field>
                 <Field label="Вес ед., кг">

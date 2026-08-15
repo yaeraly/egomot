@@ -121,6 +121,7 @@ model User {
   paymentsReceived   Payment[]           @relation("PaymentReceivedBy")
   financialTransactions FinancialTransaction[] @relation("FinancialTransactionRecordedBy")
   clientDebtTransactions ClientDebtTransaction[] @relation("ClientDebtRecordedBy")
+  productPurchasePriceChanges ProductPurchasePriceHistory[]
 
   @@index([role])
 }
@@ -160,6 +161,7 @@ model Product {
   purchaseReceiptDiscrepancies  PurchaseReceiptDiscrepancy[]
   saleItems                     SaleItem[]
   saleReturnItems               SaleReturnItem[]
+  purchasePriceHistory          ProductPurchasePriceHistory[]
 
   @@index([name])
   @@index([isActive])
@@ -217,6 +219,7 @@ model Purchase {
   items                         PurchaseItem[]
   logistics                     PurchaseLogisticsExpense[]
   receipts                      PurchaseReceipt[]
+  priceHistory                  ProductPurchasePriceHistory[]
 
   @@index([status])
   @@index([supplierId])
@@ -255,6 +258,22 @@ model PurchaseItem {
   @@unique([purchaseId, productId])
   @@index([purchaseId])
   @@index([productId])
+}
+
+model ProductPurchasePriceHistory {
+  id               String    @id @default(uuid())
+  productId        String
+  product          Product   @relation(fields: [productId], references: [id])
+  purchaseId       String?
+  purchase         Purchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  previousPriceCny Decimal?  @db.Decimal(12, 2)
+  newPriceCny      Decimal   @db.Decimal(12, 2)
+  changedByUserId  String?
+  changedBy        User?     @relation(fields: [changedByUserId], references: [id])
+  changedAt        DateTime  @default(now())
+
+  @@index([productId, changedAt])
+  @@index([purchaseId])
 }
 
 model Inventory {

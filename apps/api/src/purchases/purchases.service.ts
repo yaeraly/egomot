@@ -32,6 +32,10 @@ import {
   PurchaseSnapshot,
 } from './purchase-audit';
 import { ChangeStatusDto, UpsertPurchaseDto } from './dto/purchase.dto';
+import {
+  productPurchasePriceHistoryValues,
+  shouldSyncProductPurchasePrice,
+} from './product-purchase-price.sync';
 
 @Injectable()
 export class PurchasesService {
@@ -372,6 +376,47 @@ export class PurchasesService {
     });
   }
 
+  private async syncProductPurchasePrices(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    purchaseId: string,
+    items: PurchaseCalculation['items'],
+  ) {
+    for (const item of items) {
+      const product = await tx.product.findUniqueOrThrow({
+        where: { id: item.productId },
+      });
+      if (
+        !shouldSyncProductPurchasePrice(
+          product.defaultPurchasePriceCny,
+          item.unitPriceCny,
+        )
+      ) {
+        continue;
+      }
+
+      const values = productPurchasePriceHistoryValues(
+        product.defaultPurchasePriceCny,
+        item.unitPriceCny,
+      );
+
+      await tx.productPurchasePriceHistory.create({
+        data: {
+          productId: item.productId,
+          purchaseId,
+          previousPriceCny: values.previousPriceCny,
+          newPriceCny: values.newPriceCny,
+          changedByUserId: userId,
+        },
+      });
+
+      await tx.product.update({
+        where: { id: item.productId },
+        data: { defaultPurchasePriceCny: values.defaultPurchasePriceCny },
+      });
+    }
+  }
+
   async create(user: User, dto: UpsertPurchaseDto) {
     await this.assertRefs(dto);
     const calc = this.runCalc(dto);
@@ -392,6 +437,7 @@ export class PurchasesService {
       await tx.purchaseItem.createMany({
         data: calc.items.map((item) => this.itemData(purchase.id, item)),
       });
+      await this.syncProductPurchasePrices(tx, user.id, purchase.id, calc.items);
       if (calc.logistics.length > 0) {
         await tx.purchaseLogisticsExpense.createMany({
           data: calc.logistics.map((row) => this.logisticsData(purchase.id, row)),
@@ -448,6 +494,7 @@ export class PurchasesService {
       await tx.purchaseItem.createMany({
         data: calc.items.map((item) => this.itemData(id, item)),
       });
+      await this.syncProductPurchasePrices(tx, user.id, id, calc.items);
       if (calc.logistics.length > 0) {
         await tx.purchaseLogisticsExpense.createMany({
           data: calc.logistics.map((row) => this.logisticsData(id, row)),

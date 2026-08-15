@@ -67,6 +67,15 @@ export interface Product {
   updatedAt: string;
 }
 
+export interface ProductPurchasePriceHistoryEntry {
+  id: string;
+  previousPriceCny: string | null;
+  newPriceCny: string;
+  changedAt: string;
+  purchase: { id: string; number: string } | null;
+  changedBy: { id: string; name: string } | null;
+}
+
 export interface Supplier {
   id: string;
   name: string;

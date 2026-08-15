@@ -37,6 +37,12 @@ export class ProductsController {
     return this.products.list(search, active, categoryId);
   }
 
+  @Get(':id/purchase-price-history')
+  @Roles(...SALES_OPERATOR_ROLES)
+  purchasePriceHistory(@Param('id') id: string) {
+    return this.products.listPurchasePriceHistory(id);
+  }
+
   @Get(':id')
   @Roles(...SALES_OPERATOR_ROLES)
   get(@Param('id') id: string) {
