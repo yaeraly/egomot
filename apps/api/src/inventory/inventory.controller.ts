@@ -17,7 +17,13 @@ export class InventoryController {
   }
 
   @Get('movements')
-  listMovements(@Query('productId') productId?: string, @Query('referenceId') referenceId?: string) {
-    return this.inventory.listMovements(productId, referenceId);
+  listMovements(
+    @Query('productId') productId?: string,
+    @Query('referenceId') referenceId?: string,
+    @Query('preset') preset?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.inventory.listMovements(productId, referenceId, preset, from, to);
   }
 }

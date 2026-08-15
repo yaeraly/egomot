@@ -13,6 +13,12 @@ import type { User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { publicDecimal } from '../common/decimal.util';
 import {
+  businessDateRangeFilter,
+  formatBusinessDate,
+  parseBusinessDate,
+  resolveDateRange,
+} from '../common/date.util';
+import {
   calculatePurchase,
   PurchaseCalculation,
   PurchaseValidationError,
@@ -79,6 +85,7 @@ export class PurchasesService {
     ] as const;
 
     const result: Record<string, unknown> = { ...purchase };
+    result.purchaseDate = formatBusinessDate(purchase.purchaseDate as Date | null);
     for (const key of decimalKeys) {
       const value = purchase[key];
       result[key] = value != null ? publicDecimal(value) : value;
@@ -137,7 +144,14 @@ export class PurchasesService {
     };
   }
 
-  async list(status?: string, supplierId?: string, search?: string) {
+  async list(
+    status?: string,
+    supplierId?: string,
+    search?: string,
+    preset?: string,
+    from?: string,
+    to?: string,
+  ) {
     const where: Prisma.PurchaseWhereInput = {};
     if (status) {
       assertValidStatus(status);
@@ -151,10 +165,14 @@ export class PurchasesService {
         { supplier: { name: { contains: q, mode: 'insensitive' } } },
       ];
     }
+    const range = resolveDateRange({ preset, from, to });
+    if (range) {
+      where.purchaseDate = businessDateRangeFilter(range.from, range.to);
+    }
     const rows = await this.prisma.purchase.findMany({
       where,
       include: { supplier: true },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ purchaseDate: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
     });
     return rows.map((row) => this.serialize(row));
   }
@@ -357,12 +375,14 @@ export class PurchasesService {
   async create(user: User, dto: UpsertPurchaseDto) {
     await this.assertRefs(dto);
     const calc = this.runCalc(dto);
+    const purchaseDate = parseBusinessDate(dto.purchaseDate, 'Дата закупки');
 
     const created = await this.prisma.$transaction(async (tx) => {
       const purchase = await tx.purchase.create({
         data: {
           number: await this.nextNumber(tx),
           supplierId: dto.supplierId,
+          purchaseDate,
           status: PurchaseStatus.DRAFT,
           notes: dto.notes?.trim() || null,
           ...this.totalsData(calc),
@@ -408,6 +428,7 @@ export class PurchasesService {
 
     await this.assertRefs(dto);
     const calc = this.runCalc(dto);
+    const purchaseDate = parseBusinessDate(dto.purchaseDate, 'Дата закупки');
     const previous = this.snapshotFromRecord(existing);
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -418,6 +439,7 @@ export class PurchasesService {
         where: { id },
         data: {
           supplierId: dto.supplierId,
+          purchaseDate,
           notes: dto.notes?.trim() || null,
           ...this.totalsData(calc),
         },

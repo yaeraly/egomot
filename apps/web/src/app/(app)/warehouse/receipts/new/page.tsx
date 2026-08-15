@@ -5,7 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import { Purchase } from '@/lib/types';
-import { Button, Card, EmptyState, ErrorText, Field, PageHeader, Select } from '@/components/ui';
+import { todayInputValue } from '@/lib/date';
+import { Button, Card, EmptyState, ErrorText, Field, Input, PageHeader, Select } from '@/components/ui';
 
 const RECEIVABLE = new Set([
   'ORDERED',
@@ -22,6 +23,7 @@ export default function NewReceiptPage() {
   const presetPurchaseId = params.get('purchaseId') ?? '';
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [purchaseId, setPurchaseId] = useState(presetPurchaseId);
+  const [receiptDate, setReceiptDate] = useState(todayInputValue());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,7 +47,7 @@ export default function NewReceiptPage() {
     try {
       const receipt = await api<{ id: string }>(`/purchases/${purchaseId}/receipts`, {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify({ receiptDate }),
       });
       router.push(`/warehouse/receipts/${receipt.id}`);
     } catch (e) {
@@ -67,6 +69,9 @@ export default function NewReceiptPage() {
         />
       ) : (
         <Card className="space-y-4">
+          <Field label="Дата поступления *">
+            <Input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} />
+          </Field>
           <Field label="Закупка">
             <Select value={purchaseId} onChange={(e) => setPurchaseId(e.target.value)}>
               <option value="">Выберите закупку</option>

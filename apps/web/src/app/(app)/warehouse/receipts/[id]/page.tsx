@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
-import { formatDate, money, qty, weight } from '@/lib/format';
+import { formatBusinessDate, money, qty, weight } from '@/lib/format';
 import {
   DISCREPANCY_LABELS,
   PurchaseReceipt,
@@ -30,6 +30,7 @@ export default function ReceiptDetailPage() {
   const [transport, setTransport] = useState({ china: '', cargo: '', kg: '' });
   const [comments, setComments] = useState<Record<string, string>>({});
   const [comment, setComment] = useState('');
+  const [receiptDate, setReceiptDate] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -40,6 +41,7 @@ export default function ReceiptDetailPage() {
     const data = await api<PurchaseReceipt>(`/purchase-receipts/${id}`);
     setReceipt(data);
     setComment(data.comment ?? '');
+    setReceiptDate(data.receiptDate?.split('T')[0] ?? '');
     setTransport({
       china: data.chinaInternalTransportKgs,
       cargo: data.cargoKgs,
@@ -77,6 +79,7 @@ export default function ReceiptDetailPage() {
         method: 'PATCH',
         body: JSON.stringify({
           comment,
+          receiptDate: editable ? receiptDate : undefined,
           transport: {
             chinaInternalTransportKgs: transport.china,
             cargoKgs: transport.cargo,
@@ -123,6 +126,7 @@ export default function ReceiptDetailPage() {
       method: 'PATCH',
       body: JSON.stringify({
         comment,
+        receiptDate,
         transport: {
           chinaInternalTransportKgs: transport.china,
           cargoKgs: transport.cargo,
@@ -189,8 +193,16 @@ export default function ReceiptDetailPage() {
           <p className="font-medium">{receipt.supplier?.name}</p>
         </div>
         <div>
-          <p className="text-sm text-muted">Дата прибытия</p>
-          <p>{formatDate(receipt.arrivalDate)}</p>
+          <p className="text-sm text-muted">Дата поступления</p>
+          {editable ? (
+            <Input type="date" className="mt-1" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} />
+          ) : (
+            <p>{formatBusinessDate(receipt.receiptDate)}</p>
+          )}
+        </div>
+        <div>
+          <p className="text-sm text-muted">Дата закупки</p>
+          <p>{formatBusinessDate(receipt.purchase?.purchaseDate ?? null)}</p>
         </div>
         <div>
           <p className="text-sm text-muted">Ответственный</p>

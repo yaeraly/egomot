@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { formatDate } from '@/lib/format';
+import { formatDate, formatBusinessDate } from '@/lib/format';
 import { AuditLog, Purchase, PurchaseStatus, STATUS_LABELS } from '@/lib/types';
 import { Badge, Button, Card, PageHeader, Select } from '@/components/ui';
 import { PurchaseSummary } from '@/components/PurchaseSummary';
@@ -71,6 +71,11 @@ export default function PurchaseViewPage() {
         }
       />
       <Badge>{STATUS_LABELS[purchase.status]}</Badge>
+      {purchase.purchaseDate ? (
+        <p className="text-sm text-muted">Дата закупки: {formatBusinessDate(purchase.purchaseDate)}</p>
+      ) : (
+        <p className="text-sm text-amber-700">Дата закупки не указана — укажите при редактировании</p>
+      )}
       <PurchaseSummary
         supplierName={purchase.supplier?.name}
         totals={purchase}

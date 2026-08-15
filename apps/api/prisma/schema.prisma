@@ -153,6 +153,8 @@ model Purchase {
   estimatedTotalLandedCostKgs   Decimal       @default(0) @db.Decimal(14, 2)
   averageLogisticsCostPerKg     Decimal       @default(0) @db.Decimal(14, 4)
 
+  purchaseDate                  DateTime?     @db.Date
+
   createdAt                     DateTime      @default(now())
   updatedAt                     DateTime      @updatedAt
 
@@ -163,6 +165,7 @@ model Purchase {
   @@index([status])
   @@index([supplierId])
   @@index([createdAt])
+  @@index([purchaseDate])
   @@index([number])
 }
 
@@ -225,12 +228,14 @@ model InventoryMovement {
   referenceId      String
   userId           String
   user             User                    @relation(fields: [userId], references: [id])
+  transactionDate  DateTime?               @db.Date
   createdAt        DateTime                @default(now())
 
   @@index([productId])
   @@index([referenceType, referenceId])
   @@index([userId])
   @@index([createdAt])
+  @@index([transactionDate])
 }
 
 model PurchaseReceipt {
@@ -240,7 +245,7 @@ model PurchaseReceipt {
   purchase                       Purchase              @relation(fields: [purchaseId], references: [id])
   supplierId                     String
   supplier                       Supplier              @relation(fields: [supplierId], references: [id])
-  arrivalDate                    DateTime              @db.Date
+  receiptDate                    DateTime              @db.Date
   receivedByUserId               String
   receivedBy                     User                  @relation(fields: [receivedByUserId], references: [id])
   status                         PurchaseReceiptStatus @default(DRAFT)
@@ -262,7 +267,7 @@ model PurchaseReceipt {
   @@index([purchaseId])
   @@index([status])
   @@index([supplierId])
-  @@index([arrivalDate])
+  @@index([receiptDate])
   @@index([number])
 }
 

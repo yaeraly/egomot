@@ -11,6 +11,7 @@ const NAV = [
   { href: '/products', label: 'Товары', icon: BoxIcon },
   { href: '/suppliers', label: 'Поставщики', icon: UsersIcon },
   { href: '/purchases', label: 'Закупки', icon: CartIcon },
+  { href: '/reports', label: 'Отчёты', icon: ReportIcon },
   { href: '/settings', label: 'Настройки', icon: CogIcon },
 ];
 
@@ -55,6 +56,14 @@ function CartIcon() {
     </svg>
   );
 }
+function ReportIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M6 4h12v16H6z" />
+      <path d="M9 8h6M9 12h6M9 16h4" />
+    </svg>
+  );
+}
 function WarehouseIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -96,7 +105,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const nav = (
     <nav className="flex flex-col gap-1">
-      {NAV.slice(0, 4).map((item) => {
+      {NAV.slice(0, 5).map((item) => {
         const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
         const Icon = item.icon;
         return (
@@ -146,7 +155,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         ) : null}
       </div>
 
-      {NAV.slice(4).map((item) => {
+      {NAV.slice(5).map((item) => {
         const active = pathname.startsWith(item.href);
         const Icon = item.icon;
         return (

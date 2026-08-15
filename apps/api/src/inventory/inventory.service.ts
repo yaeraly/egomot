@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { businessDateRangeFilter, formatBusinessDate, resolveDateRange } from '../common/date.util';
 import { publicDecimal } from '../common/decimal.util';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -24,6 +25,7 @@ export class InventoryService {
       newQuantity: publicDecimal(row.newQuantity as Prisma.Decimal),
       unitCost: publicDecimal(row.unitCost as Prisma.Decimal),
       totalCost: publicDecimal(row.totalCost as Prisma.Decimal),
+      transactionDate: formatBusinessDate(row.transactionDate as Date | null),
     };
   }
 
@@ -48,10 +50,20 @@ export class InventoryService {
     return rows.map((row) => this.serializeInventory(row as unknown as Record<string, unknown>));
   }
 
-  async listMovements(productId?: string, referenceId?: string) {
+  async listMovements(
+    productId?: string,
+    referenceId?: string,
+    preset?: string,
+    from?: string,
+    to?: string,
+  ) {
     const where: Prisma.InventoryMovementWhereInput = {};
     if (productId) where.productId = productId;
     if (referenceId) where.referenceId = referenceId;
+    const range = resolveDateRange({ preset, from, to });
+    if (range) {
+      where.transactionDate = businessDateRangeFilter(range.from, range.to);
+    }
 
     const rows = await this.prisma.inventoryMovement.findMany({
       where,
@@ -59,8 +71,8 @@ export class InventoryService {
         product: { include: { category: true } },
         user: { select: { id: true, name: true, email: true } },
       },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
+      orderBy: [{ transactionDate: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+      take: 500,
     });
 
     return rows.map((row) => this.serializeMovement(row as unknown as Record<string, unknown>));

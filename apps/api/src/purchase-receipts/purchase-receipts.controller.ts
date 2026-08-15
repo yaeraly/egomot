@@ -32,8 +32,11 @@ export class PurchaseReceiptsController {
     @Query('status') status?: string,
     @Query('purchaseId') purchaseId?: string,
     @Query('search') search?: string,
+    @Query('preset') preset?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
-    return this.receipts.list(status, purchaseId, search);
+    return this.receipts.list(status, purchaseId, search, preset, from, to);
   }
 
   @Get('purchase-receipts/:id')

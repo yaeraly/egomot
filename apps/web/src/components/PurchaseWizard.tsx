@@ -14,6 +14,7 @@ import {
 } from '@/lib/types';
 import { Button, Card, ErrorText, Field, Input, Select, Textarea } from './ui';
 import { PurchaseSummary } from './PurchaseSummary';
+import { todayInputValue } from '@/lib/date';
 
 const STEPS = [
   'Поставщик',
@@ -51,6 +52,7 @@ export function PurchaseWizard({ purchase }: { purchase?: Purchase }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [productQuery, setProductQuery] = useState('');
   const [supplierId, setSupplierId] = useState(purchase?.supplierId ?? '');
+  const [purchaseDate, setPurchaseDate] = useState(purchase?.purchaseDate ?? todayInputValue());
   const [items, setItems] = useState<Line[]>(
     purchase?.items?.map((i) => ({
       productId: i.productId,
@@ -95,6 +97,7 @@ export function PurchaseWizard({ purchase }: { purchase?: Purchase }) {
   const payload = useMemo(
     () => ({
       supplierId,
+      purchaseDate,
       exchangeRateCnyToKgs,
       notes: notes || null,
       items: items.map((i) => ({
@@ -111,7 +114,7 @@ export function PurchaseWizard({ purchase }: { purchase?: Purchase }) {
         comment: row.comment || null,
       })),
     }),
-    [supplierId, exchangeRateCnyToKgs, notes, items, logistics],
+    [supplierId, purchaseDate, exchangeRateCnyToKgs, notes, items, logistics],
   );
 
   useEffect(() => {
@@ -135,7 +138,7 @@ export function PurchaseWizard({ purchase }: { purchase?: Purchase }) {
   }, [payload, step, supplierId, items.length, exchangeRateCnyToKgs]);
 
   function canNext() {
-    if (step === 0) return Boolean(supplierId);
+    if (step === 0) return Boolean(supplierId) && Boolean(purchaseDate);
     if (step === 1) return items.length > 0;
     if (step === 2) {
       return items.every(
@@ -217,6 +220,9 @@ export function PurchaseWizard({ purchase }: { purchase?: Purchase }) {
 
       {step === 0 && (
         <div className="space-y-3">
+          <Field label="Дата закупки *">
+            <Input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
+          </Field>
           <p className="font-semibold">Выберите поставщика</p>
           {suppliers.map((s) => (
             <button

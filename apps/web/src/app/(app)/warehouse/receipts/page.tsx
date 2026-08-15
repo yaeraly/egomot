@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { formatDate, money, qty } from '@/lib/format';
+import { formatBusinessDate, money, qty } from '@/lib/format';
 import { PurchaseReceipt, PurchaseReceiptStatus, RECEIPT_STATUS_LABELS } from '@/lib/types';
 import { Badge, EmptyState, PageHeader, SearchBox, Select } from '@/components/ui';
 
@@ -88,7 +88,7 @@ export default function WarehouseReceiptsPage() {
                 </div>
                 <div>
                   <p className="text-muted">Дата</p>
-                  <p>{formatDate(row.arrivalDate)}</p>
+                  <p>{formatBusinessDate(row.receiptDate)}</p>
                 </div>
               </div>
             </Link>

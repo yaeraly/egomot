@@ -19,8 +19,11 @@ export class PurchasesController {
     @Query('status') status?: string,
     @Query('supplierId') supplierId?: string,
     @Query('search') search?: string,
+    @Query('preset') preset?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
-    return this.purchases.list(status, supplierId, search);
+    return this.purchases.list(status, supplierId, search, preset, from, to);
   }
 
   @Post('preview')

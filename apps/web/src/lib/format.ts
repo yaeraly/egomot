@@ -45,3 +45,11 @@ export function formatDate(value: string): string {
     timeStyle: 'short',
   }).format(new Date(value));
 }
+
+export function formatBusinessDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const raw = value.split('T')[0];
+  const [y, m, d] = raw.split('-');
+  if (!y || !m || !d) return value;
+  return `${d}.${m}.${y}`;
+}

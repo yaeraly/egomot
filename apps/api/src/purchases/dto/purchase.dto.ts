@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsDateString,
   IsEnum,
   IsOptional,
   IsString,
@@ -45,6 +46,9 @@ export class LogisticsInputDto {
 export class UpsertPurchaseDto {
   @IsUUID()
   supplierId!: string;
+
+  @IsDateString()
+  purchaseDate!: string;
 
   @IsString()
   exchangeRateCnyToKgs!: string;

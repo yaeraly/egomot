@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { money } from '@/lib/format';
+import { money, formatBusinessDate } from '@/lib/format';
 import { Purchase, PurchaseStatus, STATUS_LABELS } from '@/lib/types';
 import { Badge, EmptyState, PageHeader, SearchBox, Select } from '@/components/ui';
 
@@ -68,6 +68,9 @@ export default function PurchasesPage() {
                 <Badge tone={TONE[p.status]}>{STATUS_LABELS[p.status]}</Badge>
               </div>
               <p className="mt-1 text-sm text-muted">{p.supplier?.name}</p>
+              {p.purchaseDate ? (
+                <p className="mt-1 text-sm text-muted">Дата закупки: {formatBusinessDate(p.purchaseDate)}</p>
+              ) : null}
               <p className="mt-1 text-sm">{money(p.estimatedTotalLandedCostKgs, 'KGS')}</p>
             </Link>
           ))

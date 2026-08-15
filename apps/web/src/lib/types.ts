@@ -108,6 +108,7 @@ export interface Purchase {
   status: PurchaseStatus;
   exchangeRateCnyToKgs: string;
   notes: string | null;
+  purchaseDate: string | null;
   totalPositions: number;
   totalQuantity: string;
   totalWeightKg: string;
@@ -196,6 +197,7 @@ export interface InventoryMovement {
   totalCost: string;
   referenceType: 'PURCHASE_RECEIPT';
   referenceId: string;
+  transactionDate: string | null;
   user: { id: string; name: string; email: string };
   createdAt: string;
 }
@@ -238,7 +240,7 @@ export interface PurchaseReceipt {
   purchase?: Purchase;
   supplierId: string;
   supplier?: Supplier;
-  arrivalDate: string;
+  receiptDate: string;
   receivedByUserId: string;
   receivedBy?: AuthUser;
   status: PurchaseReceiptStatus;

@@ -14,6 +14,13 @@ import {
 } from '@prisma/client';
 import type { User } from '@prisma/client';
 import { publicDecimal } from '../common/decimal.util';
+import {
+  assertReceiptNotBeforePurchase,
+  businessDateRangeFilter,
+  formatBusinessDate,
+  parseBusinessDate,
+  resolveDateRange,
+} from '../common/date.util';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   calculateReceipt,
@@ -109,6 +116,11 @@ export class PurchaseReceiptsService {
     ] as const;
 
     const result: Record<string, unknown> = { ...receipt };
+    result.receiptDate = formatBusinessDate(receipt.receiptDate as Date);
+    if (result.purchase && typeof result.purchase === 'object') {
+      const purchase = result.purchase as Record<string, unknown>;
+      purchase.purchaseDate = formatBusinessDate(purchase.purchaseDate as Date | null);
+    }
     for (const key of decimalKeys) {
       const value = receipt[key];
       if (value != null) result[key] = publicDecimal(value as Prisma.Decimal);
@@ -255,7 +267,7 @@ export class PurchaseReceiptsService {
     };
   }
 
-  async list(status?: string, purchaseId?: string, search?: string) {
+  async list(status?: string, purchaseId?: string, search?: string, preset?: string, from?: string, to?: string) {
     const where: Prisma.PurchaseReceiptWhereInput = {};
     if (status) where.status = status as PurchaseReceiptStatus;
     if (purchaseId) where.purchaseId = purchaseId;
@@ -267,11 +279,15 @@ export class PurchaseReceiptsService {
         { supplier: { name: { contains: q, mode: 'insensitive' } } },
       ];
     }
+    const range = resolveDateRange({ preset, from, to });
+    if (range) {
+      where.receiptDate = businessDateRangeFilter(range.from, range.to);
+    }
 
     const rows = await this.prisma.purchaseReceipt.findMany({
       where,
       include: this.include(),
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ receiptDate: 'desc' }, { createdAt: 'desc' }],
     });
     return rows.map((row) => this.serializeReceipt(row as unknown as Record<string, unknown>));
   }
@@ -290,8 +306,16 @@ export class PurchaseReceiptsService {
     if (purchase.items.length === 0) {
       throw new BadRequestException('В закупке нет товаров');
     }
+    if (!purchase.purchaseDate) {
+      throw new BadRequestException(
+        'У закупки не указана дата закупки. Укажите дату закупки перед приёмом.',
+      );
+    }
 
     const transport = this.transportFromPurchase(purchase);
+    const receiptDate = parseBusinessDate(dto.receiptDate, 'Дата поступления');
+    assertReceiptNotBeforePurchase(receiptDate, purchase.purchaseDate);
+
     const calc = this.runCalc({
       exchangeRateCnyToKgs: purchase.exchangeRateCnyToKgs,
       items: purchase.items.map((item) => ({
@@ -310,7 +334,7 @@ export class PurchaseReceiptsService {
           number: await this.nextNumber(tx),
           purchaseId: purchase.id,
           supplierId: purchase.supplierId,
-          arrivalDate: dto.arrivalDate ? new Date(dto.arrivalDate) : new Date(),
+          receiptDate,
           receivedByUserId: user.id,
           status: PurchaseReceiptStatus.DRAFT,
           comment: dto.comment ?? null,
@@ -402,11 +426,16 @@ export class PurchaseReceiptsService {
         ? PurchaseReceiptStatus.RECEIVING
         : receipt.status;
 
+    const nextReceiptDate = dto.receiptDate
+      ? parseBusinessDate(dto.receiptDate, 'Дата поступления')
+      : receipt.receiptDate;
+    assertReceiptNotBeforePurchase(nextReceiptDate, receipt.purchase.purchaseDate);
+
     const saved = await this.prisma.$transaction(async (tx) => {
       await tx.purchaseReceipt.update({
         where: { id },
         data: {
-          arrivalDate: dto.arrivalDate ? new Date(dto.arrivalDate) : receipt.arrivalDate,
+          receiptDate: nextReceiptDate,
           comment: dto.comment !== undefined ? dto.comment : receipt.comment,
           status: nextStatus,
           ...this.applyCalcToReceiptData(calc),
@@ -556,6 +585,8 @@ export class PurchaseReceiptsService {
       throw new BadRequestException('Укажите фактическое количество хотя бы для одного товара');
     }
 
+    assertReceiptNotBeforePurchase(receipt.receiptDate, receipt.purchase.purchaseDate);
+
     const commentMap = new Map(
       (dto.discrepancyComments ?? []).map((row) => [row.productId, row.comment ?? null]),
     );
@@ -635,6 +666,7 @@ export class PurchaseReceiptsService {
             referenceType: InventoryReferenceType.PURCHASE_RECEIPT,
             referenceId: id,
             userId: user.id,
+            transactionDate: receipt.receiptDate,
           },
         });
 

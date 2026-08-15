@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { formatDate, money, qty } from '@/lib/format';
+import { formatBusinessDate, formatDate, money, qty } from '@/lib/format';
 import { InventoryMovement } from '@/lib/types';
 import { Card, EmptyState, PageHeader } from '@/components/ui';
 
@@ -27,7 +27,8 @@ export default function WarehouseMovementsPage() {
                   <p className="font-semibold">{row.product.name}</p>
                   <p className="text-sm text-muted">{row.product.code}</p>
                 </div>
-                <p className="text-sm text-muted">{formatDate(row.createdAt)}</p>
+                <p className="text-sm text-muted">{formatBusinessDate(row.transactionDate)}</p>
+                <p className="text-xs text-muted">Введено: {formatDate(row.createdAt)}</p>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
                 <div>
