@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/lib/auth';
+import { UserRole } from '@/lib/types';
 import { cn } from './ui';
 
 const NAV = [
@@ -106,6 +107,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const warehouseOpen = pathname.startsWith('/warehouse');
 
+  const role = (user?.role ?? 'OWNER') as UserRole;
+  const isOwner = role === 'OWNER';
+  const isSales = role === 'SALES';
+  const isWarehouse = role === 'WAREHOUSE';
+
+  const mainNav = useMemo(() => {
+    if (isSales) {
+      return NAV.filter((item) => ['/sales', '/clients'].includes(item.href));
+    }
+    if (isWarehouse) {
+      return [];
+    }
+    return NAV.slice(0, 7);
+  }, [isSales, isWarehouse]);
+
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
@@ -122,9 +138,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
+  const settingsNav = isOwner ? NAV.slice(7) : [];
+  const showWarehouse = isOwner || isWarehouse;
+  const showSalesBalance = isOwner || isSales;
+
   const nav = (
     <nav className="flex flex-col gap-1">
-      {NAV.slice(0, 7).map((item) => {
+      {mainNav.map((item) => {
         const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
         const Icon = item.icon;
         return (
@@ -142,39 +162,56 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         );
       })}
 
-      <div className="mt-1">
+      {showSalesBalance ? (
         <Link
-          href="/warehouse/stock"
+          href="/sales/balance"
           className={cn(
             'flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm font-medium',
-            warehouseOpen ? 'bg-brand text-white' : 'text-slate-300 hover:bg-white/10 hover:text-white',
+            pathname.startsWith('/sales/balance')
+              ? 'bg-brand text-white'
+              : 'text-slate-300 hover:bg-white/10 hover:text-white',
           )}
         >
-          <WarehouseIcon />
-          Склад
+          <SaleIcon />
+          Мой баланс
         </Link>
-        {warehouseOpen ? (
-          <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-3">
-            {WAREHOUSE_NAV.map((item) => {
-              const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    'flex min-h-10 items-center rounded-lg px-3 text-sm',
-                    active ? 'bg-white/15 text-white' : 'text-slate-400 hover:bg-white/10 hover:text-white',
-                  )}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </div>
-        ) : null}
-      </div>
+      ) : null}
 
-      {NAV.slice(7).map((item) => {
+      {showWarehouse ? (
+        <div className="mt-1">
+          <Link
+            href="/warehouse/stock"
+            className={cn(
+              'flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm font-medium',
+              warehouseOpen ? 'bg-brand text-white' : 'text-slate-300 hover:bg-white/10 hover:text-white',
+            )}
+          >
+            <WarehouseIcon />
+            Склад
+          </Link>
+          {warehouseOpen ? (
+            <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-3">
+              {WAREHOUSE_NAV.map((item) => {
+                const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      'flex min-h-10 items-center rounded-lg px-3 text-sm',
+                      active ? 'bg-white/15 text-white' : 'text-slate-400 hover:bg-white/10 hover:text-white',
+                    )}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {settingsNav.map((item) => {
         const active = pathname.startsWith(item.href);
         const Icon = item.icon;
         return (

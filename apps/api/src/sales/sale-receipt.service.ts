@@ -23,6 +23,7 @@ export interface SaleReceiptPayload {
   saleNumber: string;
   confirmedAt: string;
   employeeName: string;
+  operatorRoleLabel: string;
   clientName: string;
   clientTypeLabel: string;
   clientCategoryLabel: string;
@@ -31,6 +32,8 @@ export interface SaleReceiptPayload {
   payments: ReceiptPaymentLine[];
   paidAmountKgs: string;
   debtAmountKgs: string;
+  previousDebtKgs: string;
+  newDebtKgs: string;
   clientTotalDebtKgs: string;
 }
 
@@ -61,14 +64,31 @@ export class SaleReceiptService {
     clientTypeLabel: string;
     clientCategoryLabel: string;
     clientTotalDebtKgs: Prisma.Decimal | string;
+    previousDebtKgs?: Prisma.Decimal | string;
+    newDebtKgs?: Prisma.Decimal | string;
+    operatorRoleLabel?: string;
     receiptNumber: string;
   }): SaleReceiptPayload {
+    const previousDebt =
+      input.previousDebtKgs !== undefined
+        ? typeof input.previousDebtKgs === 'string'
+          ? input.previousDebtKgs
+          : publicDecimal(input.previousDebtKgs)
+        : '0';
+    const newDebt =
+      input.newDebtKgs !== undefined
+        ? typeof input.newDebtKgs === 'string'
+          ? input.newDebtKgs
+          : publicDecimal(input.newDebtKgs)
+        : publicDecimal(input.sale.debtAmountKgs);
+
     return {
       businessName: 'EMOTORS',
       receiptNumber: input.receiptNumber,
       saleNumber: input.sale.number,
       confirmedAt: input.sale.confirmedAt?.toISOString() ?? new Date().toISOString(),
       employeeName: input.sale.soldBy?.name ?? '—',
+      operatorRoleLabel: input.operatorRoleLabel ?? '—',
       clientName: input.sale.client.name,
       clientTypeLabel: input.clientTypeLabel,
       clientCategoryLabel: input.clientCategoryLabel,
@@ -86,6 +106,8 @@ export class SaleReceiptService {
       })),
       paidAmountKgs: publicDecimal(input.sale.paidAmountKgs),
       debtAmountKgs: publicDecimal(input.sale.debtAmountKgs),
+      previousDebtKgs: previousDebt,
+      newDebtKgs: newDebt,
       clientTotalDebtKgs:
         typeof input.clientTotalDebtKgs === 'string'
           ? input.clientTotalDebtKgs
@@ -100,6 +122,9 @@ export class SaleReceiptService {
       `Чек №${payload.receiptNumber}`,
       `Продажа ${payload.saleNumber}`,
       new Date(payload.confirmedAt).toLocaleString('ru-RU'),
+      '',
+      `Оператор: ${payload.employeeName}`,
+      `Роль: ${payload.operatorRoleLabel}`,
       '',
       `Клиент: ${payload.clientName}`,
       `Тип: ${payload.clientTypeLabel}`,
@@ -127,8 +152,13 @@ export class SaleReceiptService {
     lines.push('');
     lines.push(`Оплачено:          ${payload.paidAmountKgs}`);
     lines.push(`Долг по продаже:   ${payload.debtAmountKgs}`);
+    if (dec(payload.newDebtKgs).gt(0) && dec(payload.previousDebtKgs).gt(0)) {
+      lines.push('');
+      lines.push(`Предыдущий долг:   ${payload.previousDebtKgs}`);
+      lines.push(`Новый долг:        ${payload.newDebtKgs}`);
+    }
     if (dec(payload.clientTotalDebtKgs).gt(0)) {
-      lines.push(`Текущий долг клиента: ${payload.clientTotalDebtKgs} KGS`);
+      lines.push(`Общий долг клиента: ${payload.clientTotalDebtKgs} KGS`);
     }
     return lines.join('\n');
   }

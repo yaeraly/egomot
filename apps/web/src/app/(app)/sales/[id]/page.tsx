@@ -70,6 +70,12 @@ export default function SaleDetailPage() {
         <Badge tone={sale.paymentStatus === 'PAID' ? 'green' : 'amber'}>
           {sale.paymentStatus === 'PAID' ? 'Оплачено' : 'Есть долг'}
         </Badge>
+        {sale.operator ? (
+          <p>
+            Оператор: {sale.operator.name}
+            {sale.operator.roleLabel ? ` · ${sale.operator.roleLabel}` : ''}
+          </p>
+        ) : null}
         <p>Клиент: {sale.client?.name}</p>
         <p>Тип: {payload.clientTypeLabel} · Категория: {payload.clientCategoryLabel}</p>
         <p>Итого: {money(sale.totalAmountKgs)}</p>

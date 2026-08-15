@@ -53,6 +53,10 @@ export class ConfirmSaleDto {
   @ValidateNested({ each: true })
   @Type(() => SalePaymentEntryDto)
   payments!: SalePaymentEntryDto[];
+
+  @IsOptional()
+  @IsString()
+  idempotencyKey?: string;
 }
 
 export class PayDebtDto {

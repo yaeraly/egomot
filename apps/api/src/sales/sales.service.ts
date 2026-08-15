@@ -32,6 +32,7 @@ import {
   validatePaymentEntries,
 } from './sale-calc';
 import { SALE_AUDIT_ACTIONS } from './sale-audit';
+import { USER_ROLE_LABELS } from '../common/sales-access';
 import {
   ConfirmSaleDto,
   CreateSaleReturnDto,
@@ -68,7 +69,9 @@ export class SalesService {
   private saleInclude = {
     items: { include: { product: { include: { category: true } } } },
     client: true,
-    soldBy: { select: { id: true, name: true, email: true } },
+    soldBy: { select: { id: true, name: true, email: true, role: true } },
+    createdBy: { select: { id: true, name: true, role: true } },
+    confirmedBy: { select: { id: true, name: true, role: true } },
     payments: {
       include: {
         paymentMethod: true,
@@ -149,6 +152,10 @@ export class SalesService {
         clientTypeLabel: CLIENT_TYPE_LABELS[client.clientType],
         clientCategoryLabel: CATEGORY_LABELS[pricingSnapshot.clientCategory],
       },
+      debt: {
+        previousDebtKgs: debtSummary.currentDebtKgs,
+        openSales: debtSummary.openSales,
+      },
       currentDebtKgs: debtSummary.currentDebtKgs,
       items: lines,
       totalAmountKgs: publicDecimal(roundMoney(total)),
@@ -156,6 +163,16 @@ export class SalesService {
   }
 
   async confirm(user: User, dto: ConfirmSaleDto) {
+    if (dto.idempotencyKey?.trim()) {
+      const existing = await this.prisma.sale.findUnique({
+        where: { idempotencyKey: dto.idempotencyKey.trim() },
+        include: this.saleInclude,
+      });
+      if (existing && existing.status !== SaleStatus.DRAFT) {
+        return this.serializeSale(existing);
+      }
+    }
+
     const client = await this.prisma.client.findUnique({
       where: { id: dto.clientId },
     });
@@ -203,6 +220,12 @@ export class SalesService {
       );
       const paymentStatus = resolvePaymentStatus(totalAmount, paidAmountKgs);
 
+      const pricingSnapshot = await this.clientCategory.getClientPricingSnapshot(
+        client.id,
+        client.clientType,
+      );
+      const previousDebtKgs = await this.clientDebt.getCurrentDebtKgs(client.id);
+
       return await this.prisma.$transaction(async (tx) => {
         const number = await this.nextSaleNumber(tx);
         const confirmedAt = new Date();
@@ -210,9 +233,14 @@ export class SalesService {
         const sale = await tx.sale.create({
           data: {
             number,
+            idempotencyKey: dto.idempotencyKey?.trim() || null,
             clientId: dto.clientId,
             soldByUserId: user.id,
-            status: SaleStatus.COMPLETED,
+            createdByUserId: user.id,
+            confirmedByUserId: user.id,
+            clientTypeAtSale: client.clientType,
+            clientCategoryAtSale: pricingSnapshot.clientCategory,
+            status: SaleStatus.CONFIRMED,
             paymentStatus:
               paymentStatus === 'PAID'
                 ? SalePaymentStatus.PAID
@@ -235,6 +263,8 @@ export class SalesService {
                 baseMarkupPercent: dec(row.price.baseMarkupPercent),
                 clientMarkupPercent: dec(row.price.clientMarkupPercent),
                 finalMarkupPercent: dec(row.price.finalMarkupPercent),
+                clientTypeAtSale: client.clientType,
+                clientCategoryAtSale: pricingSnapshot.clientCategory,
               })),
             },
           },
@@ -244,12 +274,14 @@ export class SalesService {
           const existing = await tx.inventory.findUnique({
             where: { productId: row.productId },
           });
+          const product = await tx.product.findUnique({
+            where: { id: row.productId },
+          });
+          const productName = product?.name ?? row.productId;
           if (!existing || existing.quantity.lt(row.quantity)) {
-            const product = await tx.product.findUnique({
-              where: { id: row.productId },
-            });
+            const available = existing ? publicDecimal(existing.quantity) : '0';
             throw new SaleValidationError([
-              `Недостаточно товара на складе: ${product?.name ?? row.productId}`,
+              `Продажа невозможна. Недостаточно товара: ${productName}. Доступно: ${available}, Запрошено: ${publicDecimal(row.quantity)}`,
             ]);
           }
 
@@ -300,10 +332,6 @@ export class SalesService {
           });
         }
 
-        const pricingSnapshot = await this.clientCategory.getClientPricingSnapshot(
-          client.id,
-          client.clientType,
-        );
         const clientTotalDebt = await this.clientDebt.getCurrentDebtKgs(client.id);
 
         const fullSale = await tx.sale.findUniqueOrThrow({
@@ -317,6 +345,9 @@ export class SalesService {
           clientTypeLabel: CLIENT_TYPE_LABELS[client.clientType],
           clientCategoryLabel: CATEGORY_LABELS[pricingSnapshot.clientCategory],
           clientTotalDebtKgs: clientTotalDebt,
+          previousDebtKgs,
+          newDebtKgs: debtAmountKgs,
+          operatorRoleLabel: USER_ROLE_LABELS[user.role],
           receiptNumber,
         });
 
@@ -523,7 +554,7 @@ export class SalesService {
     if (!sale) throw new NotFoundException('Продажа не найдена');
     if (
       sale.paymentStatus !== SalePaymentStatus.PAID ||
-      sale.status !== SaleStatus.COMPLETED
+      (sale.status !== SaleStatus.COMPLETED && sale.status !== SaleStatus.CONFIRMED)
     ) {
       throw new BadRequestException(
         'Возврат возможен только для полностью оплаченной продажи',
@@ -612,6 +643,9 @@ export class SalesService {
       totalAmountKgs: Prisma.Decimal;
       paidAmountKgs: Prisma.Decimal;
       debtAmountKgs?: Prisma.Decimal;
+      soldBy?: { id: string; name: string; role?: string } | null;
+      createdBy?: { id: string; name: string; role?: string } | null;
+      confirmedBy?: { id: string; name: string; role?: string } | null;
       items: Array<{
         quantity: Prisma.Decimal;
         unitCostKgs: Prisma.Decimal;
@@ -630,8 +664,20 @@ export class SalesService {
     },
     receiptPayload?: import('./sale-receipt.service').SaleReceiptPayload,
   ) {
+    const operator = sale.confirmedBy ?? sale.soldBy ?? sale.createdBy;
     return {
       ...sale,
+      operator: operator
+        ? {
+            id: operator.id,
+            name: operator.name,
+            role: operator.role,
+            roleLabel:
+              operator.role && operator.role in USER_ROLE_LABELS
+                ? USER_ROLE_LABELS[operator.role as keyof typeof USER_ROLE_LABELS]
+                : operator.role ?? null,
+          }
+        : null,
       totalAmountKgs: publicDecimal(sale.totalAmountKgs),
       paidAmountKgs: publicDecimal(sale.paidAmountKgs),
       debtAmountKgs: publicDecimal(sale.debtAmountKgs ?? 0),

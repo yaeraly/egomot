@@ -84,6 +84,8 @@ export default function PosPage() {
   );
 
   const debtAmount = Math.max(0, totalAmount - paidAmount);
+  const previousDebt = Number(clientCard?.debt?.currentDebtKgs ?? 0);
+  const projectedTotalDebt = previousDebt + debtAmount;
 
   async function addProduct(product: Product) {
     if (!clientId) {
@@ -182,6 +184,7 @@ export default function PosPage() {
         method: 'POST',
         body: JSON.stringify({
           clientId,
+          idempotencyKey: crypto.randomUUID(),
           items: cart.map((line) => ({
             productId: line.productId,
             quantity: line.quantity,
@@ -212,11 +215,12 @@ export default function PosPage() {
         </Field>
         {clientCard ? (
           <div className="rounded-xl bg-page p-3 text-sm">
+            <p className="font-medium">Клиент: {clientCard.client.name}</p>
             <p>Тип: {clientCard.pricing.clientTypeLabel}</p>
             <p>Категория: {clientCard.pricing.clientCategoryLabel}</p>
             <p>Покупки за 90 дней: {money(clientCard.pricing.paidPurchaseAmount90DaysKgs)}</p>
             <p className="font-medium text-amber-700">
-              Долг клиента: {money(clientCard.debt?.currentDebtKgs ?? '0')}
+              Текущий долг: {money(clientCard.debt?.currentDebtKgs ?? '0')}
             </p>
           </div>
         ) : null}
@@ -288,8 +292,13 @@ export default function PosPage() {
         ))}
         <p>Оплачено: {money(String(paidAmount))}</p>
         <p className={debtAmount > 0 ? 'font-medium text-amber-700' : ''}>
-          Долг: {money(String(debtAmount))}
+          Новый долг по продаже: {money(String(debtAmount))}
         </p>
+        {clientId ? (
+          <p className="font-semibold text-amber-800">
+            Общий долг клиента после продажи: {money(String(projectedTotalDebt))}
+          </p>
+        ) : null}
       </Card>
 
       <ErrorText error={error} />

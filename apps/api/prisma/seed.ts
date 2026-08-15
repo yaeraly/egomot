@@ -188,11 +188,51 @@ async function verifyCatalog() {
   }
 }
 
+async function seedSalesOperator() {
+  const email = (process.env.SALES_EMAIL ?? 'master@egomot.local').trim().toLowerCase();
+  const password = process.env.SALES_PASSWORD ?? process.env.OWNER_PASSWORD ?? 'Owner123!';
+  const passwordHash = await bcrypt.hash(password, 10);
+  const user = await prisma.user.upsert({
+    where: { email },
+    update: {
+      passwordHash,
+      role: UserRole.SALES,
+      name: 'Бакыт',
+    },
+    create: {
+      email,
+      passwordHash,
+      name: 'Бакыт',
+      role: UserRole.SALES,
+    },
+  });
+
+  const methods = await prisma.paymentMethod.findMany({ where: { isActive: true } });
+  for (const method of methods) {
+    await prisma.paymentAccount.upsert({
+      where: {
+        userId_paymentMethodId: { userId: user.id, paymentMethodId: method.id },
+      },
+      update: {},
+      create: {
+        userId: user.id,
+        paymentMethodId: method.id,
+        name: `${user.name} — ${method.name}`,
+        isActive: true,
+      },
+    });
+  }
+}
+
 async function main() {
   await seedOwner();
+  await seedSalesOperator();
   const ownerCount = await prisma.user.count({ where: { role: UserRole.OWNER } });
+  const salesCount = await prisma.user.count({ where: { role: UserRole.SALES } });
   // eslint-disable-next-line no-console
   console.log(`Owner ready: ${process.env.OWNER_EMAIL ?? 'owner@egomot.local'} (${ownerCount} OWNER user(s))`);
+  // eslint-disable-next-line no-console
+  console.log(`Sales operator ready: ${process.env.SALES_EMAIL ?? 'master@egomot.local'} (${salesCount} SALES user(s))`);
   await backfillCategorySlugs();
   await seedCatalog();
   await seedPricingStructure();

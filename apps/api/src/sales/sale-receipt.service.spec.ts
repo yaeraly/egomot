@@ -79,7 +79,7 @@ describe('SaleReceiptService', () => {
     expect(text).toContain('Наличные');
     expect(text).toContain('MBank');
     expect(text).toContain('Долг по продаже:   14000');
-    expect(text).toContain('Текущий долг клиента: 35000 KGS');
+    expect(text).toContain('Общий долг клиента: 35000 KGS');
   });
 });
 

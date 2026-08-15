@@ -1,4 +1,4 @@
-export type UserRole = 'OWNER' | 'WAREHOUSE';
+export type UserRole = 'OWNER' | 'SALES' | 'WAREHOUSE';
 
 export type PurchaseStatus =
   | 'DRAFT'
@@ -481,7 +481,8 @@ export interface Sale {
   clientId: string;
   client?: Client;
   soldByUserId: string | null;
-  soldBy?: { id: string; name: string; email?: string } | null;
+  soldBy?: { id: string; name: string; email?: string; role?: UserRole } | null;
+  operator?: { id: string; name: string; role?: UserRole; roleLabel?: string | null } | null;
   status: SaleStatus;
   paymentStatus: SalePaymentStatus;
   saleDate: string;
@@ -509,6 +510,10 @@ export interface SalePreview {
   client: Client;
   pricing: ClientPricingInfo;
   currentDebtKgs: string;
+  debt?: {
+    previousDebtKgs: string;
+    openSales: ClientDebtSummary['openSales'];
+  };
   items: SalePreviewLine[];
   totalAmountKgs: string;
 }
@@ -521,6 +526,7 @@ export interface SaleReceiptView {
     saleNumber: string;
     confirmedAt: string;
     employeeName: string;
+    operatorRoleLabel: string;
     clientName: string;
     clientTypeLabel: string;
     clientCategoryLabel: string;
@@ -529,6 +535,8 @@ export interface SaleReceiptView {
     payments: Array<{ methodName: string; amountKgs: string }>;
     paidAmountKgs: string;
     debtAmountKgs: string;
+    previousDebtKgs: string;
+    newDebtKgs: string;
     clientTotalDebtKgs: string;
   };
   text: string;

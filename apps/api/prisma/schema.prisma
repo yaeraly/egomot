@@ -9,6 +9,7 @@ datasource db {
 
 enum UserRole {
   OWNER
+  SALES
   WAREHOUSE
 }
 
@@ -114,6 +115,8 @@ model User {
   inventoryMovements InventoryMovement[]
   paymentAccounts    PaymentAccount[]
   salesSold          Sale[]              @relation("SaleSoldBy")
+  salesCreated       Sale[]              @relation("SaleCreatedBy")
+  salesConfirmed     Sale[]              @relation("SaleConfirmedBy")
   paymentsReceived   Payment[]           @relation("PaymentReceivedBy")
   financialTransactions FinancialTransaction[] @relation("FinancialTransactionRecordedBy")
   clientDebtTransactions ClientDebtTransaction[] @relation("ClientDebtRecordedBy")
@@ -457,10 +460,17 @@ model ClientTypeCategoryMarkup {
 model Sale {
   id             String            @id @default(uuid())
   number         String            @unique
+  idempotencyKey String?           @unique
   clientId       String
   client         Client            @relation(fields: [clientId], references: [id])
   soldByUserId   String?
   soldBy         User?             @relation("SaleSoldBy", fields: [soldByUserId], references: [id])
+  createdByUserId String?
+  createdBy      User?             @relation("SaleCreatedBy", fields: [createdByUserId], references: [id])
+  confirmedByUserId String?
+  confirmedBy    User?             @relation("SaleConfirmedBy", fields: [confirmedByUserId], references: [id])
+  clientTypeAtSale ClientType?
+  clientCategoryAtSale ClientPricingCategory?
   status         SaleStatus        @default(DRAFT)
   paymentStatus  SalePaymentStatus @default(UNPAID)
   saleDate       DateTime          @db.Date
@@ -480,6 +490,8 @@ model Sale {
 
   @@index([clientId])
   @@index([soldByUserId])
+  @@index([createdByUserId])
+  @@index([confirmedByUserId])
   @@index([status])
   @@index([paymentStatus])
   @@index([saleDate])
@@ -501,6 +513,8 @@ model SaleItem {
   baseMarkupPercent   Decimal @db.Decimal(8, 4)
   clientMarkupPercent Decimal @db.Decimal(8, 4)
   finalMarkupPercent  Decimal @db.Decimal(8, 4)
+  clientTypeAtSale    ClientType?
+  clientCategoryAtSale ClientPricingCategory?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 

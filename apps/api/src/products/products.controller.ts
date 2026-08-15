@@ -16,6 +16,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UserRole } from '@prisma/client';
 import { memoryStorage } from 'multer';
+import { SALES_OPERATOR_ROLES } from '../common/sales-access';
 import { Roles } from '../common/roles.decorator';
 import { RolesGuard } from '../common/roles.guard';
 import { CreateProductDto, UpdateProductDto } from './dto/product.dto';
@@ -23,11 +24,11 @@ import { ProductsService } from './products.service';
 
 @Controller('products')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
-@Roles(UserRole.OWNER)
 export class ProductsController {
   constructor(private readonly products: ProductsService) {}
 
   @Get()
+  @Roles(...SALES_OPERATOR_ROLES)
   list(
     @Query('search') search?: string,
     @Query('active') active?: string,
@@ -37,31 +38,37 @@ export class ProductsController {
   }
 
   @Get(':id')
+  @Roles(...SALES_OPERATOR_ROLES)
   get(@Param('id') id: string) {
     return this.products.get(id);
   }
 
   @Post()
+  @Roles(UserRole.OWNER)
   create(@Body() dto: CreateProductDto) {
     return this.products.create(dto);
   }
 
   @Patch(':id')
+  @Roles(UserRole.OWNER)
   update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
     return this.products.update(id, dto);
   }
 
   @Delete(':id')
+  @Roles(UserRole.OWNER)
   remove(@Param('id') id: string) {
     return this.products.remove(id);
   }
 
   @Post(':id/deactivate')
+  @Roles(UserRole.OWNER)
   deactivate(@Param('id') id: string) {
     return this.products.deactivate(id);
   }
 
   @Post(':id/image')
+  @Roles(UserRole.OWNER)
   @UseInterceptors(
     FileInterceptor('image', {
       storage: memoryStorage(),
@@ -76,6 +83,7 @@ export class ProductsController {
   }
 
   @Delete(':id/image')
+  @Roles(UserRole.OWNER)
   removeImage(@Param('id') id: string) {
     return this.products.removeImage(id);
   }

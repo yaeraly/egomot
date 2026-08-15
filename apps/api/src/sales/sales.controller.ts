@@ -10,6 +10,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { User } from '@prisma/client';
 import { UserRole } from '@prisma/client';
+import { SALES_OPERATOR_ROLES } from '../common/sales-access';
 import { CurrentUser } from '../common/current-user.decorator';
 import { Roles } from '../common/roles.decorator';
 import { RolesGuard } from '../common/roles.guard';
@@ -23,7 +24,7 @@ import { SalesService } from './sales.service';
 
 @Controller('sales')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
-@Roles(UserRole.OWNER, UserRole.WAREHOUSE)
+@Roles(...SALES_OPERATOR_ROLES)
 export class SalesController {
   constructor(private readonly sales: SalesService) {}
 
@@ -62,6 +63,7 @@ export class SalesController {
   }
 
   @Post(':id/returns')
+  @Roles(UserRole.OWNER)
   createReturn(@Param('id') id: string, @Body() dto: CreateSaleReturnDto) {
     return this.sales.createReturn(id, dto);
   }
