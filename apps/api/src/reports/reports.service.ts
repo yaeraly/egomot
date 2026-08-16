@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { InventoryMovementType, Prisma } from '@prisma/client';
+import { InventoryMovementType, Prisma, SaleStatus } from '@prisma/client';
 import {
   businessDateRangeFilter,
   formatBusinessDate,
@@ -130,6 +130,119 @@ export class ReportsService {
     };
   }
 
+  async saleReport(query: ReportDateQueryDto) {
+    const range = this.resolveRange(query);
+    const sales = await this.prisma.sale.findMany({
+      where: {
+        saleDate: businessDateRangeFilter(range.from, range.to),
+        status: { in: [SaleStatus.CONFIRMED, SaleStatus.COMPLETED] },
+      },
+      include: {
+        items: {
+          include: {
+            product: {
+              select: { id: true, name: true, code: true, unit: true },
+            },
+          },
+        },
+      },
+      orderBy: { saleDate: 'asc' },
+    });
+
+    type ProductBucket = {
+      productId: string;
+      productName: string;
+      productCode: string;
+      unit: string;
+      quantity: Prisma.Decimal;
+      totalAmountKgs: Prisma.Decimal;
+    };
+
+    type MonthBucket = {
+      monthKey: string;
+      monthLabel: string;
+      totalAmountKgs: Prisma.Decimal;
+      totalQuantity: Prisma.Decimal;
+      saleCount: number;
+      products: Map<string, ProductBucket>;
+    };
+
+    const monthMap = new Map<string, MonthBucket>();
+    let periodTotalAmount = new Prisma.Decimal(0);
+    let periodTotalQuantity = new Prisma.Decimal(0);
+
+    for (const sale of sales) {
+      const monthKey = saleMonthKey(sale.saleDate);
+      if (!monthMap.has(monthKey)) {
+        monthMap.set(monthKey, {
+          monthKey,
+          monthLabel: saleMonthLabel(monthKey),
+          totalAmountKgs: new Prisma.Decimal(0),
+          totalQuantity: new Prisma.Decimal(0),
+          saleCount: 0,
+          products: new Map(),
+        });
+      }
+
+      const bucket = monthMap.get(monthKey)!;
+      bucket.totalAmountKgs = bucket.totalAmountKgs.plus(sale.totalAmountKgs);
+      bucket.saleCount += 1;
+      periodTotalAmount = periodTotalAmount.plus(sale.totalAmountKgs);
+
+      for (const item of sale.items) {
+        bucket.totalQuantity = bucket.totalQuantity.plus(item.quantity);
+        periodTotalQuantity = periodTotalQuantity.plus(item.quantity);
+
+        if (!bucket.products.has(item.productId)) {
+          bucket.products.set(item.productId, {
+            productId: item.productId,
+            productName: item.product.name,
+            productCode: item.product.code,
+            unit: item.product.unit,
+            quantity: new Prisma.Decimal(0),
+            totalAmountKgs: new Prisma.Decimal(0),
+          });
+        }
+
+        const productBucket = bucket.products.get(item.productId)!;
+        productBucket.quantity = productBucket.quantity.plus(item.quantity);
+        productBucket.totalAmountKgs = productBucket.totalAmountKgs.plus(
+          item.lineTotalKgs,
+        );
+      }
+    }
+
+    const months = Array.from(monthMap.values())
+      .sort((a, b) => a.monthKey.localeCompare(b.monthKey))
+      .map((month) => ({
+        monthKey: month.monthKey,
+        monthLabel: month.monthLabel,
+        totalAmountKgs: publicDecimal(month.totalAmountKgs),
+        totalQuantity: publicDecimal(month.totalQuantity),
+        saleCount: month.saleCount,
+        products: Array.from(month.products.values())
+          .sort((a, b) => a.productName.localeCompare(b.productName, 'ru'))
+          .map((product) => ({
+            productId: product.productId,
+            productName: product.productName,
+            productCode: product.productCode,
+            unit: product.unit,
+            quantity: publicDecimal(product.quantity),
+            totalAmountKgs: publicDecimal(product.totalAmountKgs),
+          })),
+      }));
+
+    return {
+      range: { preset: range.preset, from: range.fromIso, to: range.toIso },
+      totals: {
+        totalAmountKgs: publicDecimal(periodTotalAmount),
+        totalQuantity: publicDecimal(periodTotalQuantity),
+        saleCount: sales.length,
+      },
+      months,
+    };
+  }
+
   async missingBusinessDates() {
     const [purchases, movements] = await Promise.all([
       this.prisma.purchase.findMany({
@@ -173,6 +286,21 @@ export class ReportsService {
       },
     };
   }
+}
+
+function saleMonthKey(date: Date): string {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+function saleMonthLabel(monthKey: string): string {
+  const [year, month] = monthKey.split('-');
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, 1));
+  return new Intl.DateTimeFormat('ru-RU', {
+    month: 'long',
+    year: 'numeric',
+  }).format(date);
 }
 
 function movementTypeLabel(type: InventoryMovementType): string {

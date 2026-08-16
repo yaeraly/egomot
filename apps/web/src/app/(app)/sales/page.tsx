@@ -3,13 +3,16 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { money } from '@/lib/format';
 import { Sale } from '@/lib/types';
 import { Badge, EmptyState, PageHeader, SearchBox } from '@/components/ui';
 
 export default function SalesPage() {
+  const { user } = useAuth();
   const [items, setItems] = useState<Sale[]>([]);
   const [search, setSearch] = useState('');
+  const isOwner = user?.role === 'OWNER';
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -26,6 +29,11 @@ export default function SalesPage() {
         subtitle="POS и история продаж"
         action={
           <div className="flex gap-2">
+            {isOwner ? (
+              <Link href="/reports?tab=sales" className="inline-flex min-h-12 items-center rounded-xl border border-line px-4 font-semibold">
+                Отчёт
+              </Link>
+            ) : null}
             <Link href="/sales/balance" className="inline-flex min-h-12 items-center rounded-xl border border-line px-4 font-semibold">
               Мой баланс
             </Link>

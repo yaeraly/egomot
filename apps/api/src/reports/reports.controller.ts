@@ -27,6 +27,11 @@ export class ReportsController {
     return this.run(() => this.reports.inventoryMovementReport(query));
   }
 
+  @Get('sales')
+  saleReport(@Query() query: ReportDateQueryDto) {
+    return this.run(() => this.reports.saleReport(query));
+  }
+
   @Get('missing-business-dates')
   missingBusinessDates() {
     return this.reports.missingBusinessDates();

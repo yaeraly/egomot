@@ -178,6 +178,34 @@ export interface AuditLog {
   user: { id: string; name: string; email: string };
 }
 
+export interface SalesReportProductRow {
+  productId: string;
+  productName: string;
+  productCode: string;
+  unit: string;
+  quantity: string;
+  totalAmountKgs: string;
+}
+
+export interface SalesReportMonthRow {
+  monthKey: string;
+  monthLabel: string;
+  totalAmountKgs: string;
+  totalQuantity: string;
+  saleCount: number;
+  products: SalesReportProductRow[];
+}
+
+export interface SalesReport {
+  range: { preset: string; from: string; to: string };
+  totals: {
+    totalAmountKgs: string;
+    totalQuantity: string;
+    saleCount: number;
+  };
+  months: SalesReportMonthRow[];
+}
+
 export interface DashboardSummary {
   products: number;
   suppliers: number;

@@ -8,6 +8,7 @@ describe('ReportsService business dates', () => {
     purchase: { findMany: jest.Mock };
     purchaseReceipt: { findMany: jest.Mock };
     inventoryMovement: { findMany: jest.Mock };
+    sale: { findMany: jest.Mock };
   };
 
   beforeEach(async () => {
@@ -15,6 +16,7 @@ describe('ReportsService business dates', () => {
       purchase: { findMany: jest.fn().mockResolvedValue([]) },
       purchaseReceipt: { findMany: jest.fn().mockResolvedValue([]) },
       inventoryMovement: { findMany: jest.fn().mockResolvedValue([]) },
+      sale: { findMany: jest.fn().mockResolvedValue([]) },
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -67,6 +69,21 @@ describe('ReportsService business dates', () => {
           }),
         }),
         orderBy: [{ transactionDate: 'desc' }, { createdAt: 'desc' }],
+      }),
+    );
+  });
+
+  it('sale report filters by saleDate range and confirmed statuses', async () => {
+    await service.saleReport({ from: '2026-03-01', to: '2026-03-31' });
+    expect(prisma.sale.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          saleDate: expect.objectContaining({
+            gte: expect.any(Date),
+            lte: expect.any(Date),
+          }),
+          status: { in: ['CONFIRMED', 'COMPLETED'] },
+        }),
       }),
     );
   });
