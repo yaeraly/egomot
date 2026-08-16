@@ -29,6 +29,26 @@ export class InventoryService {
     };
   }
 
+  async getStockSummary() {
+    const rows = await this.prisma.inventory.findMany({
+      where: { quantity: { gt: 0 } },
+      select: { quantity: true, totalValueKgs: true },
+    });
+
+    let totalQuantity = new Prisma.Decimal(0);
+    let totalValueKgs = new Prisma.Decimal(0);
+    for (const row of rows) {
+      totalQuantity = totalQuantity.plus(row.quantity);
+      totalValueKgs = totalValueKgs.plus(row.totalValueKgs);
+    }
+
+    return {
+      totalQuantity: publicDecimal(totalQuantity),
+      totalValueKgs: publicDecimal(totalValueKgs),
+      skuInStockCount: rows.length,
+    };
+  }
+
   async listStock(search?: string) {
     const where: Prisma.InventoryWhereInput = {};
     if (search?.trim()) {

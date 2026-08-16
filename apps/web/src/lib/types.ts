@@ -194,6 +194,12 @@ export interface DashboardSummary {
   }>;
 }
 
+export interface InventoryStockSummary {
+  totalQuantity: string;
+  totalValueKgs: string;
+  skuInStockCount: number;
+}
+
 export interface InventoryStock {
   id: string;
   productId: string;

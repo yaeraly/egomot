@@ -3,12 +3,17 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { money, qty } from '@/lib/format';
-import { InventoryStock } from '@/lib/types';
+import { InventoryStock, InventoryStockSummary } from '@/lib/types';
 import { Card, EmptyState, PageHeader, SearchBox } from '@/components/ui';
 
 export default function WarehouseStockPage() {
   const [items, setItems] = useState<InventoryStock[]>([]);
+  const [summary, setSummary] = useState<InventoryStockSummary | null>(null);
   const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    void api<InventoryStockSummary>('/inventory/summary').then(setSummary);
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -21,7 +26,34 @@ export default function WarehouseStockPage() {
   return (
     <div>
       <PageHeader title="Остатки" subtitle="Складские остатки товаров" />
-      <SearchBox value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Код или название" />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Card>
+          <p className="text-sm text-muted">Всего товаров</p>
+          <p className="mt-1 text-3xl font-bold">
+            {summary ? `${qty(summary.totalQuantity)} шт.` : '—'}
+          </p>
+        </Card>
+        <Card>
+          <p className="text-sm text-muted">Стоимость склада</p>
+          <p className="mt-1 text-3xl font-bold">
+            {summary ? money(summary.totalValueKgs, 'KGS') : '—'}
+          </p>
+          <p className="mt-1 text-xs text-muted">по себестоимости</p>
+        </Card>
+        <Card>
+          <p className="text-sm text-muted">Позиций на складе</p>
+          <p className="mt-1 text-3xl font-bold">
+            {summary ? qty(summary.skuInStockCount) : '—'}
+          </p>
+          <p className="mt-1 text-xs text-muted">SKU с остатком</p>
+        </Card>
+      </div>
+      <SearchBox
+        className="mt-4"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Код или название"
+      />
       <div className="mt-4 space-y-3">
         {items.length === 0 ? (
           <EmptyState title="Нет остатков" text="Остатки появятся после приёма товаров по закупкам" />

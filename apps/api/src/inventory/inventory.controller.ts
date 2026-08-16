@@ -11,6 +11,12 @@ import { InventoryService } from './inventory.service';
 export class InventoryController {
   constructor(private readonly inventory: InventoryService) {}
 
+  @Get('summary')
+  @Roles(UserRole.OWNER, UserRole.WAREHOUSE)
+  getStockSummary() {
+    return this.inventory.getStockSummary();
+  }
+
   @Get()
   listStock(@Query('search') search?: string) {
     return this.inventory.listStock(search);
