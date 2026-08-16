@@ -178,6 +178,37 @@ export interface AuditLog {
   user: { id: string; name: string; email: string };
 }
 
+export interface PurchaseReportProductRow {
+  productId: string;
+  productName: string;
+  productCode: string;
+  unit: string;
+  quantity: string;
+  totalAmountKgs: string;
+  purchaseCostKgs: string;
+  unitCostKgs: string;
+}
+
+export interface PurchaseReportMonthRow {
+  monthKey: string;
+  monthLabel: string;
+  totalAmountKgs: string;
+  totalQuantity: string;
+  purchaseCount: number;
+  products: PurchaseReportProductRow[];
+}
+
+export interface PurchaseReport {
+  range: { preset: string; from: string; to: string };
+  totals: {
+    totalAmountKgs: string;
+    totalQuantity: string;
+    purchaseCount: number;
+  };
+  products: PurchaseReportProductRow[];
+  months: PurchaseReportMonthRow[];
+}
+
 export interface SalesReportProductRow {
   productId: string;
   productName: string;

@@ -41,9 +41,14 @@ export default function PurchasesPage() {
         title="Закупки"
         subtitle="Закупки из Китая"
         action={
-          <Link href="/purchases/new" className="inline-flex min-h-12 items-center rounded-xl bg-brand px-4 font-semibold text-white">
-            + Закупка
-          </Link>
+          <div className="flex gap-2">
+            <Link href="/reports?tab=purchases" className="inline-flex min-h-12 items-center rounded-xl border border-line px-4 font-semibold">
+              Отчёт
+            </Link>
+            <Link href="/purchases/new" className="inline-flex min-h-12 items-center rounded-xl bg-brand px-4 font-semibold text-white">
+              + Закупка
+            </Link>
+          </div>
         }
       />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

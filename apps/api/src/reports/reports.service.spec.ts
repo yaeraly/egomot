@@ -26,7 +26,7 @@ describe('ReportsService business dates', () => {
     service = module.get(ReportsService);
   });
 
-  it('purchase report filters by purchaseDate range', async () => {
+  it('purchase report filters by purchaseDate range and excludes drafts', async () => {
     await service.purchaseReport({ from: '2026-03-01', to: '2026-03-31' });
     expect(prisma.purchase.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -35,6 +35,7 @@ describe('ReportsService business dates', () => {
             gte: expect.any(Date),
             lte: expect.any(Date),
           }),
+          status: { not: 'DRAFT' },
         }),
       }),
     );

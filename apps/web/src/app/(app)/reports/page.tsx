@@ -7,21 +7,9 @@ import { defaultCustomRange, DateRangeFilter } from '@/components/DateRangeFilte
 import { Card, PageHeader } from '@/components/ui';
 import { formatBusinessDate, money, qty } from '@/lib/format';
 import { DatePresetValue, monthInputRange } from '@/lib/date';
-import { SalesReport } from '@/lib/types';
+import { PurchaseReport, SalesReport } from '@/lib/types';
 
 type Tab = 'purchases' | 'receipts' | 'movements' | 'sales';
-
-interface PurchaseReportRow {
-  purchaseDate: string | null;
-  supplierName: string;
-  number: string;
-  totalQuantity: string;
-  totalPurchaseCny: string;
-  totalLogisticsKgs: string;
-  estimatedTotalLandedCostKgs: string;
-  status: string;
-  createdAt: string;
-}
 
 interface ReceiptReportRow {
   warehouseReceiptDate: string | null;
@@ -57,11 +45,19 @@ export default function ReportsPage() {
   const searchParams = useSearchParams();
   const initialTab = searchParams.get('tab');
   const [tab, setTab] = useState<Tab>(
-    initialTab === 'sales' ? 'sales' : initialTab === 'receipts' ? 'receipts' : initialTab === 'movements' ? 'movements' : 'purchases',
+    initialTab === 'sales'
+      ? 'sales'
+      : initialTab === 'receipts'
+        ? 'receipts'
+        : initialTab === 'movements'
+          ? 'movements'
+          : initialTab === 'purchases'
+            ? 'purchases'
+            : 'purchases',
   );
   const [preset, setPreset] = useState<DatePresetValue>('month');
   const [{ from, to }, setRange] = useState(defaultCustomRange);
-  const [purchaseRows, setPurchaseRows] = useState<PurchaseReportRow[]>([]);
+  const [purchaseReport, setPurchaseReport] = useState<PurchaseReport | null>(null);
   const [receiptRows, setReceiptRows] = useState<ReceiptReportRow[]>([]);
   const [movementRows, setMovementRows] = useState<MovementReportRow[]>([]);
   const [salesReport, setSalesReport] = useState<SalesReport | null>(null);
@@ -86,7 +82,7 @@ export default function ReportsPage() {
 
   useEffect(() => {
     if (tab === 'purchases') {
-      void api<{ rows: PurchaseReportRow[] }>(`/reports/purchases${query}`).then((data) => setPurchaseRows(data.rows));
+      void api<PurchaseReport>(`/reports/purchases${query}`).then(setPurchaseReport);
     } else if (tab === 'receipts') {
       void api<{ rows: ReceiptReportRow[] }>(`/reports/receipts${query}`).then((data) => setReceiptRows(data.rows));
     } else if (tab === 'movements') {
@@ -101,11 +97,19 @@ export default function ReportsPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title={tab === 'sales' ? 'Отчёт по продажам' : 'Отчёты'}
+        title={
+          tab === 'sales'
+            ? 'Отчёт по продажам'
+            : tab === 'purchases'
+              ? 'Отчёт по закупкам'
+              : 'Отчёты'
+        }
         subtitle={
           tab === 'sales'
             ? 'Продажи по месяцам за выбранный период'
-            : 'Фильтрация по фактическим бизнес-датам'
+            : tab === 'purchases'
+              ? 'Закупки по месяцам за выбранный период'
+              : 'Фильтрация по фактическим бизнес-датам'
         }
       />
 
@@ -160,25 +164,121 @@ export default function ReportsPage() {
       />
 
       {tab === 'purchases' ? (
-        <div className="space-y-3">
-          {purchaseRows.length === 0 ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Card>
+              <p className="text-sm text-muted">Сумма закупок за период</p>
+              <p className="mt-1 text-3xl font-bold">
+                {purchaseReport ? money(purchaseReport.totals.totalAmountKgs, 'KGS') : '—'}
+              </p>
+            </Card>
+            <Card>
+              <p className="text-sm text-muted">Количество закуплено</p>
+              <p className="mt-1 text-3xl font-bold">
+                {purchaseReport ? `${qty(purchaseReport.totals.totalQuantity)} шт.` : '—'}
+              </p>
+            </Card>
+            <Card>
+              <p className="text-sm text-muted">Закупок</p>
+              <p className="mt-1 text-3xl font-bold">
+                {purchaseReport ? qty(purchaseReport.totals.purchaseCount) : '—'}
+              </p>
+            </Card>
+          </div>
+
+          {purchaseReport && purchaseReport.range ? (
+            <p className="text-sm text-muted">
+              Период: {formatBusinessDate(purchaseReport.range.from)} — {formatBusinessDate(purchaseReport.range.to)}
+            </p>
+          ) : null}
+
+          {purchaseReport && purchaseReport.products.length > 0 ? (
+            <Card>
+              <p className="font-semibold">Себестоимость по товарам за период</p>
+              <div className="mt-4 space-y-2">
+                {purchaseReport.products.map((product) => (
+                  <div
+                    key={product.productId}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line px-3 py-2 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium">{product.productName}</p>
+                      <p className="text-muted">{product.productCode}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-4 text-right">
+                      <div>
+                        <p className="text-muted">Кол-во</p>
+                        <p>{qty(product.quantity)} {product.unit}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted">Закупочная стоимость</p>
+                        <p>{money(product.purchaseCostKgs, 'KGS')}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted">Себестоимость/ед.</p>
+                        <p>{money(product.unitCostKgs, 'KGS')}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted">Сумма с логистикой</p>
+                        <p>{money(product.totalAmountKgs, 'KGS')}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          ) : null}
+
+          {!purchaseReport || purchaseReport.months.length === 0 ? (
             <Card><p className="text-sm text-muted">Нет закупок за выбранный период</p></Card>
           ) : (
-            purchaseRows.map((row) => (
-              <Card key={row.number}>
-                <div className="flex flex-wrap justify-between gap-2">
+            purchaseReport.months.map((month) => (
+              <Card key={month.monthKey}>
+                <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <p className="font-semibold">{row.number}</p>
-                    <p className="text-sm text-muted">{row.supplierName}</p>
+                    <p className="text-lg font-semibold capitalize">{month.monthLabel}</p>
+                    <p className="text-sm text-muted">{month.purchaseCount} закупок</p>
                   </div>
-                  <p className="text-sm">{formatBusinessDate(row.purchaseDate)}</p>
+                  <div className="text-right text-sm">
+                    <p className="font-semibold">{money(month.totalAmountKgs, 'KGS')}</p>
+                    <p className="text-muted">{qty(month.totalQuantity)} шт.</p>
+                  </div>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-                  <div><p className="text-muted">Кол-во</p><p>{qty(row.totalQuantity)}</p></div>
-                  <div><p className="text-muted">CNY</p><p>{money(row.totalPurchaseCny, 'CNY')}</p></div>
-                  <div><p className="text-muted">Транспорт</p><p>{money(row.totalLogisticsKgs, 'KGS')}</p></div>
-                  <div><p className="text-muted">Себестоимость</p><p>{money(row.estimatedTotalLandedCostKgs, 'KGS')}</p></div>
-                </div>
+
+                {month.products.length > 0 ? (
+                  <div className="mt-4 space-y-2">
+                    <p className="text-sm font-semibold">По товарам</p>
+                    {month.products.map((product) => (
+                      <div
+                        key={product.productId}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line px-3 py-2 text-sm"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-medium">{product.productName}</p>
+                          <p className="text-muted">{product.productCode}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-4 text-right">
+                          <div>
+                            <p className="text-muted">Кол-во</p>
+                            <p>{qty(product.quantity)} {product.unit}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted">Закупочная стоимость</p>
+                            <p>{money(product.purchaseCostKgs, 'KGS')}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted">Себестоимость/ед.</p>
+                            <p>{money(product.unitCostKgs, 'KGS')}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted">Сумма с логистикой</p>
+                            <p>{money(product.totalAmountKgs, 'KGS')}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </Card>
             ))
           )}
