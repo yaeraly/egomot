@@ -1,6 +1,7 @@
 import {
   PrismaClient,
   UserRole,
+  ClientType,
 } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { slugifyCategoryName, uniqueCategorySlug } from '../src/common/slug.util';
@@ -182,9 +183,74 @@ async function seedSalesOperator() {
   }
 }
 
+async function seedPaymentMethods() {
+  const defaults = [
+    { code: 'CASH', name: 'Наличные', sortOrder: 1 },
+    { code: 'MBANK', name: 'MBank', sortOrder: 2 },
+    { code: 'ELCART', name: 'Элсом', sortOrder: 3 },
+    { code: 'ODENGI', name: 'О!Деньги', sortOrder: 4 },
+    { code: 'BANK_CARD', name: 'Bank Card', sortOrder: 5 },
+    { code: 'OTHER', name: 'Other', sortOrder: 6 },
+  ];
+
+  for (const row of defaults) {
+    await prisma.paymentMethod.upsert({
+      where: { code: row.code },
+      update: { name: row.name, sortOrder: row.sortOrder, isActive: true },
+      create: {
+        code: row.code,
+        name: row.name,
+        sortOrder: row.sortOrder,
+        isActive: true,
+      },
+    });
+  }
+
+  const users = await prisma.user.findMany({ where: { isActive: true } });
+  const methods = await prisma.paymentMethod.findMany({ where: { isActive: true } });
+  for (const user of users) {
+    for (const method of methods) {
+      await prisma.paymentAccount.upsert({
+        where: {
+          userId_paymentMethodId: {
+            userId: user.id,
+            paymentMethodId: method.id,
+          },
+        },
+        update: {},
+        create: {
+          userId: user.id,
+          paymentMethodId: method.id,
+          name: `${user.name} — ${method.name}`,
+          isActive: true,
+        },
+      });
+    }
+  }
+}
+
+async function seedWalkInCustomer() {
+  const existing = await prisma.client.findFirst({
+    where: { name: 'Walk-in Customer' },
+  });
+  if (existing) return existing;
+
+  return prisma.client.create({
+    data: {
+      name: 'Walk-in Customer',
+      phone: 'WALK-IN',
+      clientType: ClientType.RETAIL,
+      notes: 'System customer for anonymous retail (walk-in) sales',
+      isActive: true,
+    },
+  });
+}
+
 async function main() {
   await seedOwner();
   await seedSalesOperator();
+  await seedPaymentMethods();
+  await seedWalkInCustomer();
   const ownerCount = await prisma.user.count({ where: { role: UserRole.OWNER } });
   const salesCount = await prisma.user.count({ where: { role: UserRole.SALES } });
   // eslint-disable-next-line no-console

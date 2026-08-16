@@ -26,6 +26,10 @@ const prisma = new PrismaClient();
 
 const DATA_PATH = path.join(__dirname, 'data', 'historical-sales.tsv');
 
+const RETAIL_WALK_IN_LABEL = 'Розничный';
+const WALK_IN_CUSTOMER_NAME = 'Walk-in Customer';
+const WALK_IN_GROUP_KEY = 'walk-in';
+
 const PRODUCT_ALIASES: Record<string, string> = {
   'Аккумулятор 58Ач': 'Chaowei Аккумулятор 58 Ач',
 };
@@ -37,7 +41,7 @@ const DEFAULT_IMPORT_CATEGORY = 'Аксессуары';
 interface RawRow {
   lineNumber: number;
   dateStr: string;
-  phone: string;
+  customer: string;
   productName: string;
   quantityStr: string;
   unitPriceStr: string;
@@ -46,12 +50,21 @@ interface RawRow {
 interface ParsedRow {
   lineNumber: number;
   saleDate: Date;
-  phone: string;
-  phoneDigits: string;
+  customer: string;
+  clientKey: string;
+  isWalkIn: boolean;
+  phoneDigits: string | null;
   productName: string;
   quantity: Decimal;
   unitPriceKgs: Decimal;
 }
+
+type ResolvedClient = {
+  id: string;
+  phone: string;
+  name: string;
+  clientType: ClientType;
+};
 
 interface ValidationIssue {
   lineNumber: number;
@@ -62,9 +75,18 @@ interface ValidationIssue {
 interface SaleGroup {
   key: string;
   saleDate: Date;
-  phone: string;
-  phoneDigits: string;
+  customer: string;
+  clientKey: string;
+  isWalkIn: boolean;
+  phoneDigits: string | null;
   items: ParsedRow[];
+}
+
+interface UnmatchedCustomerReport {
+  customer: string;
+  phoneDigits: string | null;
+  lineCount: number;
+  sampleLines: number[];
 }
 
 function normalizePhoneDigits(phone: string): string {
@@ -120,10 +142,10 @@ function parseTsv(content: string): RawRow[] {
     rows.push({
       lineNumber,
       dateStr: parts[0].trim(),
-      phone: parts[1].trim(),
-      productName: parts[2].trim(),
-      quantityStr: parts[3].trim(),
-      unitPriceStr: parts[4].trim(),
+      productName: parts[1].trim(),
+      quantityStr: parts[2].trim(),
+      unitPriceStr: parts[3].trim(),
+      customer: parts[4].trim(),
     });
   }
 
@@ -142,9 +164,23 @@ function validateAndParseRows(rawRows: RawRow[]): {
       issues.push({ lineNumber: row.lineNumber, message: 'Missing date', row });
       continue;
     }
-    if (!row.phone) {
-      issues.push({ lineNumber: row.lineNumber, message: 'Missing client phone', row });
+    if (!row.customer) {
+      issues.push({ lineNumber: row.lineNumber, message: 'Missing customer', row });
       continue;
+    }
+
+    const isWalkIn = row.customer === RETAIL_WALK_IN_LABEL;
+    let phoneDigits: string | null = null;
+    if (!isWalkIn) {
+      phoneDigits = normalizePhoneDigits(row.customer);
+      if (phoneDigits.length < 9) {
+        issues.push({
+          lineNumber: row.lineNumber,
+          message: `Invalid customer phone "${row.customer}"`,
+          row,
+        });
+        continue;
+      }
     }
     if (!row.productName) {
       issues.push({ lineNumber: row.lineNumber, message: 'Missing product name', row });
@@ -189,20 +225,12 @@ function validateAndParseRows(rawRows: RawRow[]): {
       continue;
     }
 
-    const phoneDigits = normalizePhoneDigits(row.phone);
-    if (phoneDigits.length < 9) {
-      issues.push({
-        lineNumber: row.lineNumber,
-        message: `Invalid phone "${row.phone}"`,
-        row,
-      });
-      continue;
-    }
-
     parsed.push({
       lineNumber: row.lineNumber,
       saleDate,
-      phone: row.phone,
+      customer: row.customer,
+      clientKey: isWalkIn ? WALK_IN_GROUP_KEY : phoneDigits!,
+      isWalkIn,
       phoneDigits,
       productName: row.productName,
       quantity: roundQty(quantity),
@@ -218,7 +246,7 @@ function groupSales(rows: ParsedRow[]): SaleGroup[] {
 
   for (const row of rows) {
     const dateKey = row.saleDate.toISOString().slice(0, 10);
-    const key = `${dateKey}|${row.phoneDigits}`;
+    const key = `${dateKey}|${row.clientKey}`;
     const existing = map.get(key);
     if (existing) {
       existing.items.push(row);
@@ -226,7 +254,9 @@ function groupSales(rows: ParsedRow[]): SaleGroup[] {
       map.set(key, {
         key,
         saleDate: row.saleDate,
-        phone: row.phone,
+        customer: row.customer,
+        clientKey: row.clientKey,
+        isWalkIn: row.isWalkIn,
         phoneDigits: row.phoneDigits,
         items: [row],
       });
@@ -398,37 +428,62 @@ async function ensureImportProduct(
   return created;
 }
 
-async function resolveClient(
-  phone: string,
-  phoneDigits: string,
-  clientByPhoneDigits: Map<
-    string,
-    { id: string; phone: string; name: string; clientType: ClientType }
-  >,
-  dryRun: boolean,
-) {
-  const existing = clientByPhoneDigits.get(phoneDigits);
-  if (existing) return existing;
+async function resolveWalkInCustomer(): Promise<ResolvedClient> {
+  const walkIn = await prisma.client.findFirst({
+    where: { name: WALK_IN_CUSTOMER_NAME },
+    select: { id: true, phone: true, name: true, clientType: true },
+  });
+  if (!walkIn) {
+    throw new Error(
+      `System customer "${WALK_IN_CUSTOMER_NAME}" not found. Create it before running the historical sales import.`,
+    );
+  }
+  return walkIn;
+}
 
-  if (dryRun) {
-    return {
-      id: `dry-${phoneDigits}`,
-      phone,
-      name: phone,
-      clientType: ClientType.RETAIL,
-    };
+function resolveClientForGroup(
+  group: SaleGroup,
+  walkInClient: ResolvedClient,
+  clientByPhoneDigits: Map<string, ResolvedClient>,
+): ResolvedClient | null {
+  if (group.isWalkIn) {
+    return walkInClient;
+  }
+  if (!group.phoneDigits) return null;
+  return clientByPhoneDigits.get(group.phoneDigits) ?? null;
+}
+
+function collectUnmatchedCustomers(
+  groups: SaleGroup[],
+  walkInClient: ResolvedClient,
+  clientByPhoneDigits: Map<string, ResolvedClient>,
+): UnmatchedCustomerReport[] {
+  const unmatched = new Map<string, UnmatchedCustomerReport>();
+
+  for (const group of groups) {
+    const client = resolveClientForGroup(group, walkInClient, clientByPhoneDigits);
+    if (client) continue;
+
+    const reportKey = group.isWalkIn ? WALK_IN_GROUP_KEY : group.phoneDigits ?? group.customer;
+    const existing = unmatched.get(reportKey);
+    if (existing) {
+      existing.lineCount += group.items.length;
+      for (const item of group.items) {
+        if (existing.sampleLines.length < 5) {
+          existing.sampleLines.push(item.lineNumber);
+        }
+      }
+    } else {
+      unmatched.set(reportKey, {
+        customer: group.customer,
+        phoneDigits: group.phoneDigits,
+        lineCount: group.items.length,
+        sampleLines: group.items.slice(0, 5).map((item) => item.lineNumber),
+      });
+    }
   }
 
-  const created = await prisma.client.create({
-    data: {
-      name: phone,
-      phone,
-      clientType: ClientType.RETAIL,
-      isActive: true,
-    },
-  });
-  clientByPhoneDigits.set(phoneDigits, created);
-  return created;
+  return [...unmatched.values()].sort((a, b) => a.customer.localeCompare(b.customer));
 }
 
 function defaultClientCategory(): ClientPricingCategory {
@@ -487,10 +542,8 @@ async function importSaleGroup(
       string,
       { id: string; name: string; baseMarkupPercent: Prisma.Decimal | null }
     >;
-    clientByPhoneDigits: Map<
-      string,
-      { id: string; phone: string; name: string; clientType: ClientType }
-    >;
+    walkInClient: ResolvedClient;
+    clientByPhoneDigits: Map<string, ResolvedClient>;
     matrix: Array<{
       clientType: ClientType;
       category: ClientPricingCategory;
@@ -508,12 +561,16 @@ async function importSaleGroup(
     return { skipped: true, reason: 'already imported', saleNumber: existing.number };
   }
 
-  const client = await resolveClient(
-    group.phone,
-    group.phoneDigits,
+  const client = resolveClientForGroup(
+    group,
+    ctx.walkInClient,
     ctx.clientByPhoneDigits,
-    ctx.dryRun,
   );
+  if (!client) {
+    throw new Error(
+      `No matching customer for "${group.customer}" (group ${group.key}). Customer must exist before import.`,
+    );
+  }
 
   const clientCategory = defaultClientCategory();
   const clientMarkupPercent = resolveClientMarkup(
@@ -572,7 +629,7 @@ async function importSaleGroup(
       skipped: false,
       dryRun: true,
       saleNumber: '(dry-run)',
-      clientPhone: group.phone,
+      clientLabel: group.customer,
       itemCount: pricedItems.length,
       totalAmountKgs: totalAmountKgs.toFixed(2),
     };
@@ -707,7 +764,7 @@ async function importSaleGroup(
     return {
       skipped: false,
       saleNumber: number,
-      clientPhone: group.phone,
+      clientLabel: group.customer,
       itemCount: pricedItems.length,
       totalAmountKgs: totalAmountKgs.toFixed(2),
     };
@@ -741,18 +798,42 @@ async function main() {
 
   const owner = await resolveOwnerUser();
   const cashAccount = await resolveCashAccount(owner.id, owner.name);
+  const walkInClient = await resolveWalkInCustomer();
   const lookups = await buildLookups();
+
+  const unmatchedCustomers = collectUnmatchedCustomers(
+    groups,
+    walkInClient,
+    lookups.clientByPhoneDigits,
+  );
+  if (unmatchedCustomers.length) {
+    console.log('\nUnmatched customers (rows will NOT be imported):');
+    for (const report of unmatchedCustomers) {
+      const sample = report.sampleLines.join(', ');
+      console.log(
+        `  ${report.customer} | lines=${report.lineCount} | sample lines: ${sample}`,
+      );
+    }
+  }
+
+  const importableGroups = groups.filter((group) =>
+    Boolean(resolveClientForGroup(group, walkInClient, lookups.clientByPhoneDigits)),
+  );
+
+  console.log(`Importable sale groups: ${importableGroups.length}`);
+  console.log(`Blocked sale groups: ${groups.length - importableGroups.length}`);
 
   let imported = 0;
   let skipped = 0;
   let failed = 0;
 
-  for (const group of groups) {
+  for (const group of importableGroups) {
     try {
       const result = await importSaleGroup(group, {
         owner,
         cashAccount,
         productByName: lookups.productByName,
+        walkInClient,
         clientByPhoneDigits: lookups.clientByPhoneDigits,
         matrix: lookups.matrix,
         dryRun,
@@ -765,7 +846,7 @@ async function main() {
       } else {
         imported += 1;
         console.log(
-          `Imported ${result.saleNumber} | ${result.clientPhone} | items=${result.itemCount} | total=${result.totalAmountKgs}`,
+          `Imported ${result.saleNumber} | ${result.clientLabel} | items=${result.itemCount} | total=${result.totalAmountKgs}`,
         );
       }
     } catch (error) {
@@ -779,8 +860,13 @@ async function main() {
   console.log(`  imported: ${imported}`);
   console.log(`  skipped: ${skipped}`);
   console.log(`  failed: ${failed}`);
+  console.log(`  blocked (unmatched customer): ${groups.length - importableGroups.length}`);
 
-  if (failed > 0) {
+  if (unmatchedCustomers.length) {
+    console.log(`  unmatched customer keys: ${unmatchedCustomers.length}`);
+  }
+
+  if (failed > 0 || (!dryRun && importableGroups.length === 0 && parsed.length > 0)) {
     process.exitCode = 1;
   }
 }

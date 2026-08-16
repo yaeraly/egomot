@@ -22,6 +22,8 @@
     "prisma:seed": "prisma db seed",
     "import:historical-sales": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/import-historical-sales.ts",
     "import:historical-sales:dry-run": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/import-historical-sales.ts --dry-run",
+    "import:historical-sale-clients": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/import-historical-sale-clients.ts",
+    "import:historical-sale-clients:dry-run": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/import-historical-sale-clients.ts --dry-run",
     "import:product-master": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/import-product-master.ts",
     "import:product-master:dry-run": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/import-product-master.ts --dry-run",
     "clean:business-data": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/clean-business-data.ts",
