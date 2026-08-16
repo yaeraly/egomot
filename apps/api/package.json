@@ -26,6 +26,7 @@
     "import:product-master:dry-run": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/import-product-master.ts --dry-run",
     "clean:business-data": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/clean-business-data.ts",
     "clean:business-data:dry-run": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/clean-business-data.ts --dry-run",
+    "sales:delete-all": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/delete-all-sales.ts",
     "reset:database": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/clean-business-data.ts --full",
     "reset:database:dry-run": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/clean-business-data.ts --full --dry-run",
     "prisma:studio": "prisma studio"

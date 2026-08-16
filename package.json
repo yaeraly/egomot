@@ -15,8 +15,11 @@
     "test": "npm run test -w api",
     "db:up": "docker compose up -d postgres",
     "db:migrate": "npm run prisma:migrate -w api",
+    "db:migrate:deploy": "npm run prisma:migrate:deploy -w api",
     "db:seed": "npm run prisma:seed -w api",
-    "db:generate": "npm run prisma:generate -w api"
+    "db:generate": "npm run prisma:generate -w api",
+    "import:historical-sales": "npm run import:historical-sales -w api --",
+    "sales:delete-all": "npm run sales:delete-all -w api --"
   },
   "engines": {
     "node": ">=20"
