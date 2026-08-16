@@ -14,6 +14,7 @@ export const CATALOG_CATEGORY_NAMES = [
   'Зарядные устройства',
   'Инструменты',
   'Колеса',
+  'Колёса',
   'Контроллеры',
   'Крепеж',
   'Мониторы',
@@ -111,4 +112,10 @@ export const CATALOG_PRODUCTS: CatalogProductRow[] = [
   { code: 'PRD-0079', name: 'Преобразователь 48–72В 15А', category: 'Электроника', weightKg: '0.135', purchasePriceCny: '10.00' },
   { code: 'PRD-0080', name: 'Реле поворотов 12В', category: 'Электроника', weightKg: '0.010', purchasePriceCny: '2.00' },
   { code: 'PRD-0081', name: 'Реле поворотов 48–60В', category: 'Электроника', weightKg: '0.010', purchasePriceCny: '2.00' },
+  { code: 'PRD-0082', name: 'Плата с 3 датчиками', category: 'Электроника', weightKg: '0.020', purchasePriceCny: '5.00' },
+  { code: 'PRD-0083', name: 'Переднее крыло 3.00-3.50-12', category: 'Колёса', weightKg: '0.400', purchasePriceCny: '6.00' },
+  { code: 'PRD-0084', name: 'Переднее крыло 3.75-4.00-12', category: 'Колёса', weightKg: '0.450', purchasePriceCny: '6.00' },
+  { code: 'PRD-0085', name: 'Переднее крыло 4.50-5.00-12', category: 'Колёса', weightKg: '0.500', purchasePriceCny: '14.00' },
+  { code: 'PRD-0086', name: 'Рычаг повышенной/пониженной передачи', category: 'Органы управления', weightKg: '0.250', purchasePriceCny: '10.000' },
+  { code: 'PRD-0087', name: 'Рулевая колонка', category: 'Органы управления', weightKg: '3.400', purchasePriceCny: '83.000' },
 ];
