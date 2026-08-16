@@ -24,7 +24,7 @@ function parseCustomers(content: string): Map<string, string> {
     if (!trimmed || trimmed.startsWith('ДАТА')) continue;
     const parts = line.split('\t');
     if (parts.length < 5) continue;
-    const customer = parts[4].trim();
+    const customer = parts[1].trim();
     if (!customer || customer === RETAIL_WALK_IN_LABEL) continue;
     const digits = normalizePhoneDigits(customer);
     if (digits.length < 9) continue;

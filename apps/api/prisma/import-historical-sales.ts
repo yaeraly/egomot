@@ -142,10 +142,10 @@ function parseTsv(content: string): RawRow[] {
     rows.push({
       lineNumber,
       dateStr: parts[0].trim(),
-      productName: parts[1].trim(),
-      quantityStr: parts[2].trim(),
-      unitPriceStr: parts[3].trim(),
-      customer: parts[4].trim(),
+      customer: parts[1].trim(),
+      productName: parts[2].trim(),
+      quantityStr: parts[3].trim(),
+      unitPriceStr: parts[4].trim(),
     });
   }
 
