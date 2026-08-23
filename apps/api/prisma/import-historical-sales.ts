@@ -1,8 +1,10 @@
 /**
- * One-off importer for historical sales spreadsheet data.
+ * Historical sales importer.
  *
  * Usage:
- *   npx ts-node --compiler-options '{"module":"CommonJS"}' prisma/import-historical-sales.ts [--dry-run]
+ *   npm run import:historical-sales -- --validate prisma/data/historical-sales.tsv
+ *   npm run import:historical-sales -- prisma/data/historical-sales.tsv
+ *   npm run import:historical-sales -- --dry-run prisma/data/historical-sales.tsv
  */
 import {
   ClientPricingCategory,
@@ -21,222 +23,18 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { dec, roundMoney, roundQty, roundUnitCost } from '../src/purchases/purchase-calc';
 import { findMatrixMarkup, roundMarkup } from '../src/pricing/pricing-calc';
+import {
+  normalizePhoneDigits,
+  printSalesValidationReport,
+  resolveProductName,
+  SalesGroup,
+  validateHistoricalSales,
+  WALK_IN_CUSTOMER_NAME,
+  WALK_IN_CUSTOMER_PHONE,
+} from '../src/sales/historical-sales-import.logic';
 
 const prisma = new PrismaClient();
-
-const DATA_PATH = path.join(__dirname, 'data', 'historical-sales.tsv');
-
-const PRODUCT_ALIASES: Record<string, string> = {
-  'Аккумулятор 58Ач': 'Chaowei Аккумулятор 58 Ач',
-};
-
-const SKIP_PRODUCTS = new Set(['Товар']);
-
 const DEFAULT_IMPORT_CATEGORY = 'Аксессуары';
-
-interface RawRow {
-  lineNumber: number;
-  dateStr: string;
-  phone: string;
-  productName: string;
-  quantityStr: string;
-  unitPriceStr: string;
-}
-
-interface ParsedRow {
-  lineNumber: number;
-  saleDate: Date;
-  phone: string;
-  phoneDigits: string;
-  productName: string;
-  quantity: Decimal;
-  unitPriceKgs: Decimal;
-}
-
-interface ValidationIssue {
-  lineNumber: number;
-  message: string;
-  row?: RawRow;
-}
-
-interface SaleGroup {
-  key: string;
-  saleDate: Date;
-  phone: string;
-  phoneDigits: string;
-  items: ParsedRow[];
-}
-
-function normalizePhoneDigits(phone: string): string {
-  return phone.replace(/\D/g, '');
-}
-
-function parseMoney(value: string): Decimal | null {
-  const trimmed = value.trim().replace(/,/g, '');
-  if (!trimmed) return null;
-  const n = dec(trimmed);
-  return n.isNaN() ? null : n;
-}
-
-function parseQuantity(value: string): Decimal | null {
-  const trimmed = value.trim().replace(/,/g, '');
-  if (!trimmed) return null;
-  const n = dec(trimmed);
-  return n.isNaN() ? null : n;
-}
-
-function parseSaleDate(dateStr: string): Date | null {
-  const parts = dateStr.trim().split('/');
-  if (parts.length !== 3) return null;
-  const month = Number(parts[0]);
-  const day = Number(parts[1]);
-  const year = Number(parts[2]);
-  if (!month || !day || !year) return null;
-  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-}
-
-function parseTsv(content: string): RawRow[] {
-  const lines = content.split(/\r?\n/);
-  const rows: RawRow[] = [];
-  let lineNumber = 0;
-
-  for (const line of lines) {
-    lineNumber += 1;
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    if (
-      trimmed.startsWith('ДАТА') ||
-      trimmed.includes('КОЛИЧ') ||
-      trimmed.includes('ЦЕНА')
-    ) {
-      continue;
-    }
-
-    const parts = line.split('\t');
-    if (parts.length < 5) {
-      continue;
-    }
-
-    rows.push({
-      lineNumber,
-      dateStr: parts[0].trim(),
-      phone: parts[1].trim(),
-      productName: parts[2].trim(),
-      quantityStr: parts[3].trim(),
-      unitPriceStr: parts[4].trim(),
-    });
-  }
-
-  return rows;
-}
-
-function validateAndParseRows(rawRows: RawRow[]): {
-  parsed: ParsedRow[];
-  issues: ValidationIssue[];
-} {
-  const parsed: ParsedRow[] = [];
-  const issues: ValidationIssue[] = [];
-
-  for (const row of rawRows) {
-    if (!row.dateStr) {
-      issues.push({ lineNumber: row.lineNumber, message: 'Missing date', row });
-      continue;
-    }
-    if (!row.phone) {
-      issues.push({ lineNumber: row.lineNumber, message: 'Missing client phone', row });
-      continue;
-    }
-    if (!row.productName) {
-      issues.push({ lineNumber: row.lineNumber, message: 'Missing product name', row });
-      continue;
-    }
-    if (SKIP_PRODUCTS.has(row.productName)) {
-      issues.push({
-        lineNumber: row.lineNumber,
-        message: `Skipped placeholder product "${row.productName}"`,
-        row,
-      });
-      continue;
-    }
-
-    const saleDate = parseSaleDate(row.dateStr);
-    if (!saleDate) {
-      issues.push({
-        lineNumber: row.lineNumber,
-        message: `Invalid date "${row.dateStr}"`,
-        row,
-      });
-      continue;
-    }
-
-    const quantity = parseQuantity(row.quantityStr);
-    if (quantity === null || quantity.lte(0)) {
-      issues.push({
-        lineNumber: row.lineNumber,
-        message: `Invalid or missing quantity "${row.quantityStr}"`,
-        row,
-      });
-      continue;
-    }
-
-    const unitPriceKgs = parseMoney(row.unitPriceStr);
-    if (unitPriceKgs === null || unitPriceKgs.lte(0)) {
-      issues.push({
-        lineNumber: row.lineNumber,
-        message: `Invalid or missing unit price "${row.unitPriceStr}"`,
-        row,
-      });
-      continue;
-    }
-
-    const phoneDigits = normalizePhoneDigits(row.phone);
-    if (phoneDigits.length < 9) {
-      issues.push({
-        lineNumber: row.lineNumber,
-        message: `Invalid phone "${row.phone}"`,
-        row,
-      });
-      continue;
-    }
-
-    parsed.push({
-      lineNumber: row.lineNumber,
-      saleDate,
-      phone: row.phone,
-      phoneDigits,
-      productName: row.productName,
-      quantity: roundQty(quantity),
-      unitPriceKgs: roundMoney(unitPriceKgs),
-    });
-  }
-
-  return { parsed, issues };
-}
-
-function groupSales(rows: ParsedRow[]): SaleGroup[] {
-  const map = new Map<string, SaleGroup>();
-
-  for (const row of rows) {
-    const dateKey = row.saleDate.toISOString().slice(0, 10);
-    const key = `${dateKey}|${row.phoneDigits}`;
-    const existing = map.get(key);
-    if (existing) {
-      existing.items.push(row);
-    } else {
-      map.set(key, {
-        key,
-        saleDate: row.saleDate,
-        phone: row.phone,
-        phoneDigits: row.phoneDigits,
-        items: [row],
-      });
-    }
-  }
-
-  return [...map.values()].sort(
-    (a, b) => a.saleDate.getTime() - b.saleDate.getTime(),
-  );
-}
 
 function computeHistoricalInventoryAfterSale(params: {
   currentQuantity: Decimal.Value;
@@ -343,8 +141,35 @@ async function buildLookups() {
   return { productByName, clientByPhoneDigits, matrix, categoryThresholds };
 }
 
-function resolveProductName(name: string): string {
-  return PRODUCT_ALIASES[name] ?? name;
+function resolveProductNameLocal(name: string): string {
+  return resolveProductName(name);
+}
+
+async function ensureWalkInCustomer(
+  dryRun: boolean,
+): Promise<{ id: string; phone: string; name: string; clientType: ClientType }> {
+  const existing = await prisma.client.findFirst({
+    where: { name: WALK_IN_CUSTOMER_NAME },
+  });
+  if (existing) return existing;
+
+  if (dryRun) {
+    return {
+      id: 'dry-walk-in',
+      phone: WALK_IN_CUSTOMER_PHONE,
+      name: WALK_IN_CUSTOMER_NAME,
+      clientType: ClientType.RETAIL,
+    };
+  }
+
+  return prisma.client.create({
+    data: {
+      name: WALK_IN_CUSTOMER_NAME,
+      phone: WALK_IN_CUSTOMER_PHONE,
+      clientType: ClientType.RETAIL,
+      isActive: true,
+    },
+  });
 }
 
 async function ensureImportProduct(
@@ -355,7 +180,7 @@ async function ensureImportProduct(
   >,
   dryRun: boolean,
 ) {
-  const canonicalName = resolveProductName(name);
+  const canonicalName = resolveProductNameLocal(name);
   const existing = productByName.get(canonicalName);
   if (existing) return existing;
 
@@ -405,6 +230,7 @@ async function resolveClient(
     string,
     { id: string; phone: string; name: string; clientType: ClientType }
   >,
+  walkInCustomer: { id: string; phone: string; name: string; clientType: ClientType },
   dryRun: boolean,
 ) {
   const existing = clientByPhoneDigits.get(phoneDigits);
@@ -412,23 +238,14 @@ async function resolveClient(
 
   if (dryRun) {
     return {
-      id: `dry-${phoneDigits}`,
-      phone,
-      name: phone,
+      id: `dry-walk-in-${phoneDigits}`,
+      phone: walkInCustomer.phone,
+      name: walkInCustomer.name,
       clientType: ClientType.RETAIL,
     };
   }
 
-  const created = await prisma.client.create({
-    data: {
-      name: phone,
-      phone,
-      clientType: ClientType.RETAIL,
-      isActive: true,
-    },
-  });
-  clientByPhoneDigits.set(phoneDigits, created);
-  return created;
+  return walkInCustomer;
 }
 
 function defaultClientCategory(): ClientPricingCategory {
@@ -472,14 +289,14 @@ async function resolveImportProduct(
   >,
   dryRun: boolean,
 ) {
-  const canonicalName = resolveProductName(productName);
+  const canonicalName = resolveProductNameLocal(productName);
   const existing = productByName.get(canonicalName);
   if (existing) return existing;
   return ensureImportProduct(productName, productByName, dryRun);
 }
 
 async function importSaleGroup(
-  group: SaleGroup,
+  group: SalesGroup,
   ctx: {
     owner: { id: string };
     cashAccount: { id: string; paymentMethodId: string };
@@ -496,6 +313,12 @@ async function importSaleGroup(
       category: ClientPricingCategory;
       markupPercent: Prisma.Decimal;
     }>;
+    walkInCustomer: {
+      id: string;
+      phone: string;
+      name: string;
+      clientType: ClientType;
+    };
     dryRun: boolean;
   },
 ) {
@@ -512,6 +335,7 @@ async function importSaleGroup(
     group.phone,
     group.phoneDigits,
     ctx.clientByPhoneDigits,
+    ctx.walkInCustomer,
     ctx.dryRun,
   );
 
@@ -714,40 +538,67 @@ async function importSaleGroup(
   });
 }
 
+function resolveDataPath(defaultRelative: string): string {
+  const args = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
+  const candidates = [
+    args[0],
+    defaultRelative,
+    path.join('apps', 'api', defaultRelative),
+  ].filter(Boolean) as string[];
+
+  for (const candidate of candidates) {
+    const resolved = path.isAbsolute(candidate)
+      ? candidate
+      : path.resolve(process.cwd(), candidate);
+    if (fs.existsSync(resolved)) return resolved;
+  }
+
+  return path.resolve(process.cwd(), args[0] ?? defaultRelative);
+}
+
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
+  const validateOnly = process.argv.includes('--validate');
+  const dataPath = resolveDataPath(path.join('prisma', 'data', 'historical-sales.tsv'));
 
-  if (!fs.existsSync(DATA_PATH)) {
-    throw new Error(`Data file not found: ${DATA_PATH}`);
+  if (!fs.existsSync(dataPath)) {
+    throw new Error(`Data file not found: ${dataPath}`);
   }
 
-  const content = fs.readFileSync(DATA_PATH, 'utf8');
-  const rawRows = parseTsv(content);
-  const { parsed, issues } = validateAndParseRows(rawRows);
-  const groups = groupSales(parsed);
+  const content = fs.readFileSync(dataPath, 'utf8');
+  const validation = validateHistoricalSales(content);
+  printSalesValidationReport(validation);
 
-  console.log(`Source rows (data lines): ${rawRows.length}`);
-  console.log(`Valid line items: ${parsed.length}`);
-  console.log(`Validation issues: ${issues.length}`);
-  console.log(`Sale groups (date + client): ${groups.length}`);
-  console.log(`Mode: ${dryRun ? 'DRY RUN' : 'IMPORT'}`);
-
-  if (issues.length) {
-    console.log('\nValidation report:');
-    for (const issue of issues) {
-      console.log(`  line ${issue.lineNumber}: ${issue.message}`);
-    }
+  if (validateOnly) {
+    process.exitCode = validation.ok ? 0 : 1;
+    return;
   }
+
+  if (!validation.ok) {
+    console.error(
+      '\nImport blocked: source file failed validation. Fix source data or use --validate only.',
+    );
+    process.exit(1);
+  }
+
+  const groups = validation.groups;
+  console.log(`\nMode: ${dryRun ? 'DRY RUN' : 'IMPORT'}`);
+  console.log(`Source file: ${dataPath}`);
 
   const owner = await resolveOwnerUser();
   const cashAccount = await resolveCashAccount(owner.id, owner.name);
+  const walkInCustomer = await ensureWalkInCustomer(dryRun);
   const lookups = await buildLookups();
 
   let imported = 0;
   let skipped = 0;
   let failed = 0;
+  let walkInGroups = 0;
 
   for (const group of groups) {
+    const matchedExisting = lookups.clientByPhoneDigits.get(group.phoneDigits);
+    if (!matchedExisting) walkInGroups += 1;
+
     try {
       const result = await importSaleGroup(group, {
         owner,
@@ -755,6 +606,7 @@ async function main() {
         productByName: lookups.productByName,
         clientByPhoneDigits: lookups.clientByPhoneDigits,
         matrix: lookups.matrix,
+        walkInCustomer,
         dryRun,
       });
       if (result.skipped) {
@@ -779,6 +631,7 @@ async function main() {
   console.log(`  imported: ${imported}`);
   console.log(`  skipped: ${skipped}`);
   console.log(`  failed: ${failed}`);
+  console.log(`  walk-in sale groups: ${walkInGroups}`);
 
   if (failed > 0) {
     process.exitCode = 1;

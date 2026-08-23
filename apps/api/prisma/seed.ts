@@ -1,9 +1,14 @@
 import {
   PrismaClient,
   UserRole,
+  ClientType,
 } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { slugifyCategoryName, uniqueCategorySlug } from '../src/common/slug.util';
+import {
+  WALK_IN_CUSTOMER_NAME,
+  WALK_IN_CUSTOMER_PHONE,
+} from '../src/sales/historical-sales-import.logic';
 import {
   CATALOG_CATEGORY_NAMES,
   CATALOG_PRODUCTS,
@@ -182,9 +187,36 @@ async function seedSalesOperator() {
   }
 }
 
+async function seedWalkInCustomer() {
+  const existing = await prisma.client.findFirst({
+    where: { name: WALK_IN_CUSTOMER_NAME },
+  });
+  if (existing) {
+    await prisma.client.update({
+      where: { id: existing.id },
+      data: {
+        phone: WALK_IN_CUSTOMER_PHONE,
+        clientType: ClientType.RETAIL,
+        isActive: true,
+      },
+    });
+    return;
+  }
+
+  await prisma.client.create({
+    data: {
+      name: WALK_IN_CUSTOMER_NAME,
+      phone: WALK_IN_CUSTOMER_PHONE,
+      clientType: ClientType.RETAIL,
+      isActive: true,
+    },
+  });
+}
+
 async function main() {
   await seedOwner();
   await seedSalesOperator();
+  await seedWalkInCustomer();
   const ownerCount = await prisma.user.count({ where: { role: UserRole.OWNER } });
   const salesCount = await prisma.user.count({ where: { role: UserRole.SALES } });
   // eslint-disable-next-line no-console

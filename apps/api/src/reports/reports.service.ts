@@ -439,6 +439,8 @@ function movementTypeLabel(type: InventoryMovementType): string {
   switch (type) {
     case 'PURCHASE_RECEIPT':
       return 'Приход';
+    case 'SALE':
+      return 'Продажа';
     default:
       return type;
   }

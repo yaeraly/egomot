@@ -22,6 +22,7 @@ const WAREHOUSE_NAV = [
   { href: '/warehouse/stock', label: 'Остатки' },
   { href: '/warehouse/receipts', label: 'Приход' },
   { href: '/warehouse/movements', label: 'Движения' },
+  { href: '/warehouse/reconciliation', label: 'Сверка' },
   { href: '/warehouse/inventory-count', label: 'Инвентаризация' },
 ];
 
