@@ -8,6 +8,8 @@ export const FINAL_EXPECTED_TOTAL_AMOUNT_KGS = '8160605';
 
 export const WALK_IN_CUSTOMER_NAME = 'Walk-in Customer';
 export const WALK_IN_CUSTOMER_PHONE = 'walk-in';
+export const WALK_IN_GROUP_TOKEN = 'walk-in';
+export const ROZNICNY_LABEL = 'розничный';
 
 const SKIP_PRODUCTS = new Set(['Товар']);
 
@@ -32,6 +34,7 @@ export interface ParsedSalesRow {
   saleDate: Date;
   phone: string;
   phoneDigits: string;
+  isWalkIn: boolean;
   productName: string;
   quantity: Decimal;
   unitPriceKgs: Decimal;
@@ -48,6 +51,7 @@ export interface SalesGroup {
   saleDate: Date;
   phone: string;
   phoneDigits: string;
+  isWalkIn: boolean;
   items: ParsedSalesRow[];
 }
 
@@ -57,6 +61,7 @@ export interface SalesBatchTotals {
   invalidRows: number;
   saleItems: number;
   saleGroups: number;
+  walkInRows: number;
   totalQuantity: string;
   totalAmountKgs: string;
 }
@@ -78,6 +83,46 @@ export interface SalesFinalValidationResult {
 
 export function normalizePhoneDigits(phone: string): string {
   return phone.replace(/\D/g, '');
+}
+
+export function normalizeCustomerLabel(value: string): string {
+  return normalizeHistoricalField(value).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+export function isRoznichnyCustomer(value: string): boolean {
+  return normalizeCustomerLabel(value) === ROZNICNY_LABEL;
+}
+
+export type HistoricalCustomerIdentity =
+  | { kind: 'walk-in'; groupToken: typeof WALK_IN_GROUP_TOKEN; lookedUpPhone: false }
+  | { kind: 'phone'; phoneDigits: string; lookedUpPhone: true }
+  | { kind: 'invalid'; message: string; lookedUpPhone: boolean };
+
+export function resolveHistoricalCustomer(
+  customerField: string,
+): HistoricalCustomerIdentity {
+  if (!customerField.trim()) {
+    return { kind: 'invalid', message: 'Missing client', lookedUpPhone: false };
+  }
+
+  if (isRoznichnyCustomer(customerField)) {
+    return {
+      kind: 'walk-in',
+      groupToken: WALK_IN_GROUP_TOKEN,
+      lookedUpPhone: false,
+    };
+  }
+
+  const phoneDigits = normalizePhoneDigits(customerField);
+  if (phoneDigits.length >= 9) {
+    return { kind: 'phone', phoneDigits, lookedUpPhone: true };
+  }
+
+  return {
+    kind: 'invalid',
+    message: `Invalid phone "${customerField}"`,
+    lookedUpPhone: true,
+  };
 }
 
 export function normalizeHistoricalField(value: string): string {
@@ -164,7 +209,8 @@ export function parseHistoricalSalesTsv(content: string): RawSalesRow[] {
     if (
       trimmed.startsWith('ДАТА') ||
       trimmed.includes('КОЛИЧ') ||
-      trimmed.includes('ЦЕНА')
+      trimmed.includes('ЦЕНА') ||
+      /^КЛИЕНТ\b/i.test(trimmed)
     ) {
       continue;
     }
@@ -234,7 +280,7 @@ function parseBatchRows(
       continue;
     }
     if (!row.phone) {
-      issues.push({ lineNumber: row.lineNumber, message: 'Missing client phone' });
+      issues.push({ lineNumber: row.lineNumber, message: 'Missing client' });
       continue;
     }
     if (!row.productName) {
@@ -276,14 +322,18 @@ function parseBatchRows(
       continue;
     }
 
-    const phoneDigits = normalizePhoneDigits(row.phone);
-    if (phoneDigits.length < 9) {
+    const customer = resolveHistoricalCustomer(row.phone);
+    if (customer.kind === 'invalid') {
       issues.push({
         lineNumber: row.lineNumber,
-        message: `Invalid phone "${row.phone}"`,
+        message: customer.message,
       });
       continue;
     }
+
+    const isWalkIn = customer.kind === 'walk-in';
+    const phoneDigits =
+      customer.kind === 'walk-in' ? customer.groupToken : customer.phoneDigits;
 
     const qty = roundQty(quantity);
     const unitPrice = roundMoney(unitPriceKgs);
@@ -292,6 +342,7 @@ function parseBatchRows(
       saleDate,
       phone: row.phone,
       phoneDigits,
+      isWalkIn,
       productName: row.productName,
       quantity: qty,
       unitPriceKgs: unitPrice,
@@ -328,6 +379,7 @@ function summarizeBatch(
     invalidRows: issues.length,
     saleItems: parsed.length,
     saleGroups: groups.length,
+    walkInRows: parsed.filter((row) => row.isWalkIn).length,
     totalQuantity: totalQuantity.toFixed(),
     totalAmountKgs: totalAmountKgs.toFixed(2),
   };
@@ -409,6 +461,7 @@ export function groupHistoricalSales(rows: ParsedSalesRow[]): SalesGroup[] {
         saleDate: row.saleDate,
         phone: row.phone,
         phoneDigits: row.phoneDigits,
+        isWalkIn: row.isWalkIn,
         items: [row],
       });
     }
@@ -452,6 +505,7 @@ export function printBatchValidationReport(
   console.log(`Total quantity:     ${result.totals.totalQuantity}`);
   console.log(`Sales amount:       ${result.totals.totalAmountKgs} сом`);
   console.log(`Validation issues:  ${result.issues.length}`);
+  console.log(`Walk-in rows:       ${result.totals.walkInRows}`);
 
   if (result.issues.length) {
     console.log('');

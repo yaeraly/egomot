@@ -8,14 +8,17 @@ import {
   filterNewRows,
   groupHistoricalSales,
   normalizePhoneDigits,
+  isRoznichnyCustomer,
   parseHistoricalSalesTsv,
   resolveBatchStatus,
+  resolveHistoricalCustomer,
   resolveProductName,
   resolveValidateExitCode,
   validateFinalHistoricalSales,
   validateHistoricalSalesBatch,
   WALK_IN_CUSTOMER_NAME,
   WALK_IN_CUSTOMER_PHONE,
+  WALK_IN_GROUP_TOKEN,
 } from './historical-sales-import.logic';
 
 const SAMPLE_ROW =
@@ -41,6 +44,7 @@ function parsedRow(overrides: Partial<{
     saleDate,
     phone: overrides.phone ?? '0507 535 337',
     phoneDigits,
+    isWalkIn: phoneDigits === WALK_IN_GROUP_TOKEN,
     productName,
     quantity,
     unitPriceKgs,
@@ -235,5 +239,90 @@ describe('historical-sales-import.logic', () => {
   it('builds sale group keys from phone and date', () => {
     const row = parsedRow();
     expect(buildSaleGroupKey(row as never)).toBe('2026-05-14|0507535337');
+  });
+
+  it('maps Розничный variants to Walk-in Customer without phone lookup', () => {
+    for (const value of ['Розничный', 'РОЗНИЧНЫЙ', 'розничный', ' Розничный ']) {
+      expect(isRoznichnyCustomer(value)).toBe(true);
+      const identity = resolveHistoricalCustomer(value);
+      expect(identity).toEqual({
+        kind: 'walk-in',
+        groupToken: WALK_IN_GROUP_TOKEN,
+        lookedUpPhone: false,
+      });
+    }
+  });
+
+  it('groups multiple Розничный rows on the same date into one Sale', () => {
+    const content = [
+      '5/11/2026\tРозничный\tProduct A\t1.00\t100.00',
+      '5/11/2026\tРОЗНИЧНЫЙ\tProduct B\t2.00\t200.00',
+      '5/11/2026\t розничный \tProduct C\t3.00\t300.00',
+    ].join('\n');
+    const result = validateHistoricalSalesBatch(content, 'historical-sales.tsv');
+    expect(result.status).toBe('PASS');
+    expect(result.issues).toHaveLength(0);
+    expect(result.totals.walkInRows).toBe(3);
+    expect(result.totals.saleGroups).toBe(1);
+    expect(result.groups[0].isWalkIn).toBe(true);
+    expect(result.groups[0].items).toHaveLength(3);
+  });
+
+  it('creates different Sales for Розничный rows on different dates', () => {
+    const content = [
+      '5/11/2026\tРозничный\tProduct A\t1.00\t100.00',
+      '6/11/2026\tРозничный\tProduct B\t1.00\t100.00',
+    ].join('\n');
+    const result = validateHistoricalSalesBatch(content, 'historical-sales.tsv');
+    expect(result.totals.saleGroups).toBe(2);
+    expect(result.groups.every((group) => group.isWalkIn)).toBe(true);
+  });
+
+  it('keeps phone customers grouped separately from Розничный', () => {
+    const content = [
+      '5/11/2026\t0554 016 142\tProduct A\t1.00\t100.00',
+      '5/11/2026\tРозничный\tProduct B\t1.00\t100.00',
+    ].join('\n');
+    const result = validateHistoricalSalesBatch(content, 'historical-sales.tsv');
+    expect(result.totals.saleGroups).toBe(2);
+    expect(result.totals.walkInRows).toBe(1);
+    const phoneIdentity = resolveHistoricalCustomer('0554 016 142');
+    expect(phoneIdentity.kind).toBe('phone');
+    expect(phoneIdentity.lookedUpPhone).toBe(true);
+  });
+
+  it('maps unknown phones to Walk-in grouping token only after phone lookup fails in import', () => {
+    const identity = resolveHistoricalCustomer('0704002983');
+    expect(identity.kind).toBe('phone');
+    if (identity.kind === 'phone') {
+      expect(identity.phoneDigits).toBe('0704002983');
+    }
+  });
+
+  it('does not create a Розничный customer identity', () => {
+    expect(resolveHistoricalCustomer('Розничный').kind).toBe('walk-in');
+    expect(WALK_IN_CUSTOMER_NAME).not.toBe('Розничный');
+    expect(WALK_IN_CUSTOMER_PHONE).toBe('walk-in');
+  });
+
+  it('treats cash-paid walk-in rows as valid historical retail sales', () => {
+    const result = validateHistoricalSalesBatch(
+      '5/11/2026\tРозничный\tProduct A\t1.00\t1594.00\n',
+      'historical-sales.tsv',
+    );
+    expect(result.status).toBe('PASS');
+    expect(result.parsed[0].unitPriceKgs.toFixed(2)).toBe('1594.00');
+    expect(result.parsed[0].isWalkIn).toBe(true);
+  });
+
+  it('keeps Розничный row ids stable across re-import', () => {
+    const content = '5/11/2026\tРозничный\tProduct A\t1.00\t100.00\n';
+    const first = validateHistoricalSalesBatch(content, 'historical-sales.tsv');
+    const second = filterNewRows(
+      first.parsed,
+      new Set(first.parsed.map((row) => row.sourceRowId)),
+    );
+    expect(second.newRows).toHaveLength(0);
+    expect(second.duplicatesSkipped).toBe(1);
   });
 });

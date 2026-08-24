@@ -40,6 +40,7 @@ import {
   validateHistoricalSalesBatch,
   WALK_IN_CUSTOMER_NAME,
   WALK_IN_CUSTOMER_PHONE,
+  WALK_IN_GROUP_TOKEN,
 } from '../src/sales/historical-sales-import.logic';
 
 const prisma = new PrismaClient();
@@ -160,9 +161,29 @@ async function ensureWalkInCustomer(): Promise<{
   name: string;
   clientType: ClientType;
 }> {
-  const existing = await prisma.client.findFirst({
-    where: { name: WALK_IN_CUSTOMER_NAME },
+  const matches = await prisma.client.findMany({
+    where: {
+      OR: [
+        { name: { equals: WALK_IN_CUSTOMER_NAME, mode: 'insensitive' } },
+        { name: { equals: 'Walk-in', mode: 'insensitive' } },
+        { name: { equals: 'Розничный', mode: 'insensitive' } },
+        { phone: WALK_IN_CUSTOMER_PHONE },
+      ],
+    },
+    orderBy: { createdAt: 'asc' },
   });
+
+  const unique = new Map(matches.map((row) => [row.id, row]));
+  if (unique.size > 1) {
+    const names = [...unique.values()]
+      .map((row) => `${row.name} (${row.id})`)
+      .join(', ');
+    throw new Error(
+      `Multiple Walk-in Customer records found: ${names}. Resolve the ambiguity before importing.`,
+    );
+  }
+
+  const existing = unique.size === 1 ? [...unique.values()][0] : null;
   if (existing) return existing;
 
   return prisma.client.create({
@@ -218,15 +239,18 @@ function filterRowsWithProducts(
   return { importableRows, productIssues };
 }
 
-async function resolveClient(
-  phoneDigits: string,
+function resolveClient(
+  group: { phoneDigits: string; isWalkIn: boolean },
   clientByPhoneDigits: Map<
     string,
     { id: string; phone: string; name: string; clientType: ClientType }
   >,
   walkInCustomer: { id: string; phone: string; name: string; clientType: ClientType },
 ) {
-  return clientByPhoneDigits.get(phoneDigits) ?? walkInCustomer;
+  if (group.isWalkIn || group.phoneDigits === WALK_IN_GROUP_TOKEN) {
+    return walkInCustomer;
+  }
+  return clientByPhoneDigits.get(group.phoneDigits) ?? walkInCustomer;
 }
 
 function defaultClientCategory(): ClientPricingCategory {
@@ -304,8 +328,8 @@ async function importSaleGroup(
     };
   }
 
-  const client = await resolveClient(
-    group.phoneDigits,
+  const client = resolveClient(
+    group,
     ctx.clientByPhoneDigits,
     ctx.walkInCustomer,
   );
@@ -561,6 +585,7 @@ function printBatchImportReport(input: {
   salesCreated: number;
   quantity: string;
   salesAmount: string;
+  walkInRows: number;
   walkInSales: number;
   existingCustomerSales: number;
   cashPayments: number;
@@ -586,6 +611,7 @@ function printBatchImportReport(input: {
   console.log(`Quantity:          ${input.quantity}`);
   console.log(`Sales amount:      ${input.salesAmount} сом`);
   console.log('');
+  console.log(`Walk-in rows:      ${input.walkInRows}`);
   console.log(`Walk-in sales:     ${input.walkInSales}`);
   console.log(`Existing customers: ${input.existingCustomerSales}`);
   console.log('');
@@ -713,6 +739,7 @@ async function main() {
     salesCreated,
     quantity: importQuantity.toFixed(),
     salesAmount: importAmount.toFixed(2),
+    walkInRows: batch.totals.walkInRows,
     walkInSales,
     existingCustomerSales,
     cashPayments,
