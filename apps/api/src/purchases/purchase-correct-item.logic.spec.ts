@@ -1,79 +1,70 @@
 import {
+  findPurchaseItemByProductName,
   formatProductCorrectionPreview,
   namesMatch,
-  selectIncorrectPurchaseItem,
+  resolveTargetLineWeight,
+  SOURCE_PRODUCT_NAME,
   TARGET_PRODUCT_NAME,
+  TARGET_UNIT_WEIGHT_KG,
 } from './purchase-correct-item.logic';
 
-const charger = {
-  productId: 'p-charger',
-  productName: 'Зарядка 60В 58Ач',
-  productCode: 'PRD-0007',
+const wrongName = {
+  productId: 'p-wrong',
+  productName: SOURCE_PRODUCT_NAME,
+  productCode: 'PRD-0099',
   quantity: '10.000',
-  unitPriceCny: '50.00',
-  unitLandedCostKgs: '720.0000',
-};
-
-const tire = {
-  productId: 'p-tire',
-  productName: 'Шина 5.00–12',
-  productCode: 'PRD-0021',
-  quantity: '8.000',
+  unitWeightKg: '0.944',
   unitPriceCny: '85.00',
   unitLandedCostKgs: '1400.0000',
 };
 
-const other = {
-  productId: 'p-other',
-  productName: 'Каска',
-  productCode: 'PRD-0002',
-  quantity: '1.000',
-  unitPriceCny: '10.00',
-  unitLandedCostKgs: '150.0000',
+const tire = {
+  productId: 'p-tire',
+  productName: TARGET_PRODUCT_NAME,
+  productCode: 'PRD-0021',
+  quantity: '8.000',
+  unitWeightKg: '6.000',
+  unitPriceCny: '85.00',
+  unitLandedCostKgs: '1400.0000',
 };
 
 describe('purchase-correct-item.logic', () => {
-  it('selects the only remaining incorrect item', () => {
-    expect(selectIncorrectPurchaseItem([charger], TARGET_PRODUCT_NAME)).toEqual(charger);
+  it('finds the purchase item with the current wrong product name', () => {
+    expect(findPurchaseItemByProductName([wrongName, tire], SOURCE_PRODUCT_NAME)).toEqual(
+      wrongName,
+    );
   });
 
-  it('selects a related charger line when other unrelated items exist', () => {
-    expect(selectIncorrectPurchaseItem([charger, other], TARGET_PRODUCT_NAME)).toEqual(charger);
+  it('returns null when the source product is not on the purchase', () => {
+    expect(findPurchaseItemByProductName([tire], SOURCE_PRODUCT_NAME)).toBeNull();
   });
 
-  it('uses --from when two related products are present', () => {
-    expect(
-      selectIncorrectPurchaseItem([charger, tire], TARGET_PRODUCT_NAME, 'Шина 5.00-12'),
-    ).toEqual(tire);
+  it('sets unit weight to 6.000 and total weight from quantity', () => {
+    expect(resolveTargetLineWeight('10.000')).toEqual({
+      unitWeightKg: TARGET_UNIT_WEIGHT_KG,
+      totalWeightKg: '60.000',
+    });
   });
 
-  it('formats the required preview without changing cost', () => {
+  it('formats the name, weight, and cargo preview', () => {
     expect(
       formatProductCorrectionPreview({
         purchaseNumber: 'ZG-2026-0004',
-        current: charger,
+        current: wrongName,
         newProductName: TARGET_PRODUCT_NAME,
+        newUnitWeightKg: TARGET_UNIT_WEIGHT_KG,
+        currentCargoKgs: '12000.00',
       }),
-    ).toBe(
-      [
-        'Purchase: ZG-2026-0004',
-        '',
-        'Current product:',
-        'Зарядка 60В 58Ач',
-        '',
-        'Current quantity:',
-        '10.000',
-        '',
-        'Current cost price:',
-        '720.0000',
-        '',
-        'New product:',
-        'Зарядка 60В 58Ач Шина 5.00–12',
-        '',
-        'Cost price remains:',
-        '720.0000',
-      ].join('\n'),
-    );
+    ).toContain('New product:     Шина 5.00–12');
+    expect(
+      formatProductCorrectionPreview({
+        purchaseNumber: 'ZG-2026-0004',
+        current: wrongName,
+        newProductName: TARGET_PRODUCT_NAME,
+        newUnitWeightKg: TARGET_UNIT_WEIGHT_KG,
+        currentCargoKgs: '12000.00',
+      }),
+    ).toContain('New weight:      6.000 кг');
   });
 
   it('treats hyphen and en-dash product names as the same', () => {
