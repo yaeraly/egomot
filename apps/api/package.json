@@ -29,6 +29,7 @@
     "clean:business-data:dry-run": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/clean-business-data.ts --dry-run",
     "sales:delete-all": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/delete-all-sales.ts",
     "purchase:rebuild": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/rebuild-purchase.ts",
+    "purchase:correct-item": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/correct-purchase-item.ts",
     "report:inventory-reconciliation": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/report-inventory-reconciliation.ts",
     "reset:database": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/clean-business-data.ts --full",
     "reset:database:dry-run": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/clean-business-data.ts --full --dry-run",
