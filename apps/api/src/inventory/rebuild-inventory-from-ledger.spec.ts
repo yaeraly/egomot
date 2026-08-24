@@ -1,4 +1,7 @@
-import { rebuildInventoryFromReceiptMovements } from './rebuild-inventory-from-ledger';
+import {
+  rebuildInventoryFromLedgerMovements,
+  rebuildInventoryFromReceiptMovements,
+} from './rebuild-inventory-from-ledger';
 import { computeInventoryAfterSale, computeInventoryAfterSaleReverse } from '../sales/sale-calc';
 
 describe('rebuild-inventory-from-ledger', () => {
@@ -32,6 +35,33 @@ describe('rebuild-inventory-from-ledger', () => {
     const snapshots = rebuildInventoryFromReceiptMovements([], ['p-sold-only']);
     expect(snapshots[0].quantity).toBe('0.000');
     expect(snapshots[0].totalValueKgs).toBe('0.00');
+  });
+
+  it('rebuilds stock from purchase receipts followed by sales', () => {
+    const snapshots = rebuildInventoryFromLedgerMovements(
+      [
+        {
+          productId: 'p1',
+          type: 'PURCHASE_RECEIPT' as const,
+          quantity: '100',
+          unitCost: '10',
+          transactionDate: new Date(Date.UTC(2026, 4, 1)),
+          createdAt: new Date(Date.UTC(2026, 4, 1, 10)),
+        },
+        {
+          productId: 'p1',
+          type: 'SALE' as const,
+          quantity: '30',
+          unitCost: '10',
+          transactionDate: new Date(Date.UTC(2026, 4, 15)),
+          createdAt: new Date(Date.UTC(2026, 4, 15, 10)),
+        },
+      ],
+      ['p1'],
+    );
+
+    expect(snapshots[0].quantity).toBe('70.000');
+    expect(snapshots[0].totalValueKgs).toBe('700.00');
   });
 });
 
