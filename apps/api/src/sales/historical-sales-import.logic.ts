@@ -1,9 +1,10 @@
 import Decimal from 'decimal.js';
+import * as path from 'path';
 
-export const EXPECTED_SOURCE_ROWS = 1533;
-export const EXPECTED_SALE_ITEMS = 1533;
-export const EXPECTED_TOTAL_QUANTITY = '6555';
-export const EXPECTED_TOTAL_AMOUNT_KGS = '8160605';
+export const FINAL_EXPECTED_SOURCE_ROWS = 1533;
+export const FINAL_EXPECTED_SALE_ITEMS = 1533;
+export const FINAL_EXPECTED_TOTAL_QUANTITY = '6555';
+export const FINAL_EXPECTED_TOTAL_AMOUNT_KGS = '8160605';
 
 export const WALK_IN_CUSTOMER_NAME = 'Walk-in Customer';
 export const WALK_IN_CUSTOMER_PHONE = 'walk-in';
@@ -13,6 +14,8 @@ const SKIP_PRODUCTS = new Set(['Товар']);
 export const PRODUCT_ALIASES: Record<string, string> = {
   'Аккумулятор 58Ач': 'Chaowei Аккумулятор 58 Ач',
 };
+
+export type BatchStatus = 'PASS' | 'WARNING' | 'ERROR';
 
 export interface RawSalesRow {
   lineNumber: number;
@@ -25,6 +28,7 @@ export interface RawSalesRow {
 
 export interface ParsedSalesRow {
   lineNumber: number;
+  sourceRowId: string;
   saleDate: Date;
   phone: string;
   phoneDigits: string;
@@ -47,23 +51,28 @@ export interface SalesGroup {
   items: ParsedSalesRow[];
 }
 
-export interface SalesControlTotals {
+export interface SalesBatchTotals {
   sourceRows: number;
   validRows: number;
-  skippedRows: number;
+  invalidRows: number;
   saleItems: number;
   saleGroups: number;
   totalQuantity: string;
   totalAmountKgs: string;
 }
 
-export interface SalesValidationResult {
-  ok: boolean;
+export interface SalesBatchValidationResult {
+  status: BatchStatus;
   rawRows: RawSalesRow[];
   parsed: ParsedSalesRow[];
   issues: SalesValidationIssue[];
   groups: SalesGroup[];
-  totals: SalesControlTotals;
+  totals: SalesBatchTotals;
+}
+
+export interface SalesFinalValidationResult {
+  status: 'PASS' | 'BLOCKED';
+  totals: SalesBatchTotals;
   discrepancies: string[];
 }
 
@@ -180,7 +189,41 @@ export function resolveProductName(name: string): string {
   return PRODUCT_ALIASES[name] ?? name;
 }
 
-export function validateHistoricalSales(content: string): SalesValidationResult {
+export function buildSourceRowId(
+  sourceFile: string,
+  row: {
+    lineNumber: number;
+    saleDate: Date;
+    phoneDigits: string;
+    productName: string;
+    quantity: Decimal;
+    unitPriceKgs: Decimal;
+  },
+): string {
+  const base = path.basename(sourceFile);
+  const dateKey = row.saleDate.toISOString().slice(0, 10);
+  const product = resolveProductName(row.productName);
+  return [
+    'historical-row',
+    base,
+    `L${row.lineNumber}`,
+    dateKey,
+    row.phoneDigits,
+    product,
+    row.quantity.toFixed(3),
+    row.unitPriceKgs.toFixed(2),
+  ].join('|');
+}
+
+export function buildSaleGroupKey(row: Pick<ParsedSalesRow, 'saleDate' | 'phoneDigits'>): string {
+  const dateKey = row.saleDate.toISOString().slice(0, 10);
+  return `${dateKey}|${row.phoneDigits}`;
+}
+
+function parseBatchRows(
+  content: string,
+  sourceFile: string,
+): Pick<SalesBatchValidationResult, 'rawRows' | 'parsed' | 'issues'> {
   const rawRows = parseHistoricalSalesTsv(content);
   const parsed: ParsedSalesRow[] = [];
   const issues: SalesValidationIssue[] = [];
@@ -244,7 +287,7 @@ export function validateHistoricalSales(content: string): SalesValidationResult 
 
     const qty = roundQty(quantity);
     const unitPrice = roundMoney(unitPriceKgs);
-    parsed.push({
+    const baseRow = {
       lineNumber: row.lineNumber,
       saleDate,
       phone: row.phone,
@@ -253,9 +296,22 @@ export function validateHistoricalSales(content: string): SalesValidationResult 
       quantity: qty,
       unitPriceKgs: unitPrice,
       lineTotalKgs: roundMoney(qty.times(unitPrice)),
+    };
+
+    parsed.push({
+      ...baseRow,
+      sourceRowId: buildSourceRowId(sourceFile, baseRow),
     });
   }
 
+  return { rawRows, parsed, issues };
+}
+
+function summarizeBatch(
+  rawRows: RawSalesRow[],
+  parsed: ParsedSalesRow[],
+  issues: SalesValidationIssue[],
+): SalesBatchTotals {
   const groups = groupHistoricalSales(parsed);
   const totalQuantity = parsed.reduce(
     (sum, row) => sum.plus(row.quantity),
@@ -266,45 +322,75 @@ export function validateHistoricalSales(content: string): SalesValidationResult 
     new Decimal(0),
   );
 
-  const totals: SalesControlTotals = {
+  return {
     sourceRows: rawRows.length,
     validRows: parsed.length,
-    skippedRows: rawRows.length - parsed.length,
+    invalidRows: issues.length,
     saleItems: parsed.length,
     saleGroups: groups.length,
     totalQuantity: totalQuantity.toFixed(),
     totalAmountKgs: totalAmountKgs.toFixed(2),
   };
+}
 
-  const discrepancies: string[] = [];
-  if (totals.sourceRows !== EXPECTED_SOURCE_ROWS) {
-    discrepancies.push(
-      `Source rows: expected ${EXPECTED_SOURCE_ROWS}, got ${totals.sourceRows}`,
-    );
-  }
-  if (totals.saleItems !== EXPECTED_SALE_ITEMS) {
-    discrepancies.push(
-      `Sale items: expected ${EXPECTED_SALE_ITEMS}, got ${totals.saleItems}`,
-    );
-  }
-  if (totals.totalQuantity !== EXPECTED_TOTAL_QUANTITY) {
-    discrepancies.push(
-      `Total quantity: expected ${EXPECTED_TOTAL_QUANTITY}, got ${totals.totalQuantity}`,
-    );
-  }
-  if (totals.totalAmountKgs !== EXPECTED_TOTAL_AMOUNT_KGS) {
-    discrepancies.push(
-      `Sales amount: expected ${EXPECTED_TOTAL_AMOUNT_KGS}, got ${totals.totalAmountKgs}`,
-    );
-  }
+export function resolveBatchStatus(
+  validRows: number,
+  invalidRows: number,
+): BatchStatus {
+  if (validRows === 0) return 'ERROR';
+  if (invalidRows > 0) return 'WARNING';
+  return 'PASS';
+}
+
+export function validateHistoricalSalesBatch(
+  content: string,
+  sourceFile = 'historical-sales.tsv',
+): SalesBatchValidationResult {
+  const { rawRows, parsed, issues } = parseBatchRows(content, sourceFile);
+  const totals = summarizeBatch(rawRows, parsed, issues);
+  const groups = groupHistoricalSales(parsed);
 
   return {
-    ok: discrepancies.length === 0 && issues.length === 0,
+    status: resolveBatchStatus(totals.validRows, totals.invalidRows),
     rawRows,
     parsed,
     issues,
     groups,
     totals,
+  };
+}
+
+export function validateFinalHistoricalSales(
+  content: string,
+  sourceFile = 'historical-sales.tsv',
+): SalesFinalValidationResult {
+  const batch = validateHistoricalSalesBatch(content, sourceFile);
+  const discrepancies: string[] = [];
+
+  if (batch.totals.sourceRows !== FINAL_EXPECTED_SOURCE_ROWS) {
+    discrepancies.push(
+      `Expected rows: ${FINAL_EXPECTED_SOURCE_ROWS}, got ${batch.totals.sourceRows}`,
+    );
+  }
+  if (batch.totals.saleItems !== FINAL_EXPECTED_SALE_ITEMS) {
+    discrepancies.push(
+      `Expected sale items: ${FINAL_EXPECTED_SALE_ITEMS}, got ${batch.totals.saleItems}`,
+    );
+  }
+  if (batch.totals.totalQuantity !== FINAL_EXPECTED_TOTAL_QUANTITY) {
+    discrepancies.push(
+      `Expected quantity: ${FINAL_EXPECTED_TOTAL_QUANTITY}, got ${batch.totals.totalQuantity}`,
+    );
+  }
+  if (batch.totals.totalAmountKgs !== FINAL_EXPECTED_TOTAL_AMOUNT_KGS) {
+    discrepancies.push(
+      `Expected sales: ${FINAL_EXPECTED_TOTAL_AMOUNT_KGS}, got ${batch.totals.totalAmountKgs}`,
+    );
+  }
+
+  return {
+    status: discrepancies.length === 0 ? 'PASS' : 'BLOCKED',
+    totals: batch.totals,
     discrepancies,
   };
 }
@@ -313,8 +399,7 @@ export function groupHistoricalSales(rows: ParsedSalesRow[]): SalesGroup[] {
   const map = new Map<string, SalesGroup>();
 
   for (const row of rows) {
-    const dateKey = row.saleDate.toISOString().slice(0, 10);
-    const key = `${dateKey}|${row.phoneDigits}`;
+    const key = buildSaleGroupKey(row);
     const existing = map.get(key);
     if (existing) {
       existing.items.push(row);
@@ -334,28 +419,85 @@ export function groupHistoricalSales(rows: ParsedSalesRow[]): SalesGroup[] {
   );
 }
 
-export function printSalesValidationReport(result: SalesValidationResult): void {
+export function filterNewRows(
+  rows: ParsedSalesRow[],
+  importedSourceRowIds: Set<string>,
+): { newRows: ParsedSalesRow[]; duplicatesSkipped: number } {
+  const newRows: ParsedSalesRow[] = [];
+  let duplicatesSkipped = 0;
+
+  for (const row of rows) {
+    if (importedSourceRowIds.has(row.sourceRowId)) {
+      duplicatesSkipped += 1;
+    } else {
+      newRows.push(row);
+    }
+  }
+
+  return { newRows, duplicatesSkipped };
+}
+
+export function printBatchValidationReport(
+  result: SalesBatchValidationResult,
+  sourceFile?: string,
+): void {
   console.log('=== HISTORICAL SALES VALIDATION ===');
+  console.log('');
+  if (sourceFile) {
+    console.log(`Source file:       ${sourceFile}`);
+  }
   console.log(`Source rows:        ${result.totals.sourceRows}`);
-  console.log(`Valid sale items:   ${result.totals.saleItems}`);
+  console.log(`Valid sale items:   ${result.totals.validRows}`);
   console.log(`Sale groups:        ${result.totals.saleGroups}`);
   console.log(`Total quantity:     ${result.totals.totalQuantity}`);
   console.log(`Sales amount:       ${result.totals.totalAmountKgs} сом`);
   console.log(`Validation issues:  ${result.issues.length}`);
 
   if (result.issues.length) {
-    console.log('\nIssues:');
+    console.log('');
+    console.log('Skipped invalid rows:');
     for (const issue of result.issues) {
-      console.log(`  line ${issue.lineNumber}: ${issue.message}`);
+      console.log(`Row ${issue.lineNumber} — ${issue.message}`);
     }
   }
 
+  console.log('');
+  console.log(`Status: ${result.status}`);
+}
+
+export function resolveValidateExitCode(status: BatchStatus): number {
+  return status === 'ERROR' ? 1 : 0;
+}
+
+export function printFinalReconciliationReport(
+  result: SalesFinalValidationResult,
+): void {
+  console.log('=== FINAL HISTORICAL SALES RECONCILIATION ===');
+  console.log(`Expected rows:        ${FINAL_EXPECTED_SOURCE_ROWS}`);
+  console.log(`Actual rows:          ${result.totals.sourceRows}`);
+  console.log('');
+  console.log(`Expected quantity:    ${FINAL_EXPECTED_TOTAL_QUANTITY}`);
+  console.log(`Actual quantity:      ${result.totals.totalQuantity}`);
+  console.log('');
+  console.log(`Expected sales:       ${FINAL_EXPECTED_TOTAL_AMOUNT_KGS} сом`);
+  console.log(`Actual sales:         ${result.totals.totalAmountKgs} сом`);
+
   if (result.discrepancies.length) {
-    console.log('\nControl total discrepancies:');
+    console.log('\nDiscrepancies:');
     for (const line of result.discrepancies) {
       console.log(`  ${line}`);
     }
   }
 
-  console.log(`\nStatus: ${result.ok ? 'PASS' : 'BLOCKED'}`);
+  console.log(`\nStatus: ${result.status}`);
+}
+
+/** @deprecated Use validateHistoricalSalesBatch */
+export function validateHistoricalSales(content: string): SalesBatchValidationResult {
+  return validateHistoricalSalesBatch(content);
+}
+
+/** @deprecated Use printBatchValidationReport */
+export function printSalesValidationReport(result: SalesBatchValidationResult): void {
+  printBatchValidationReport(result);
 }
