@@ -26,13 +26,14 @@ import { findMatrixMarkup, roundMarkup } from '../src/pricing/pricing-calc';
 import {
   BatchStatus,
   buildSaleGroupKey,
+  activeImportedSourceRowIds,
   filterNewRows,
   groupHistoricalSales,
   normalizePhoneDigits,
   ParsedSalesRow,
   printBatchValidationReport,
   printFinalReconciliationReport,
-  resolveBatchStatus,
+  resolveImportStatus,
   resolveProductName,
   resolveValidateExitCode,
   SalesGroup,
@@ -148,11 +149,36 @@ async function buildLookups() {
 }
 
 async function loadImportedSourceRowIds(): Promise<Set<string>> {
+  // Audit logs survive Sale deletion. Only treat a source row as imported
+  // when the Sale it created still exists, so the same TSV can be re-imported.
   const rows = await prisma.auditLog.findMany({
     where: { action: HISTORICAL_SALE_ITEM_ACTION },
-    select: { entityId: true },
+    select: { entityId: true, newValue: true },
   });
-  return new Set(rows.map((row) => row.entityId));
+
+  const markers = rows.map((row) => {
+    const payload = row.newValue as { saleId?: string } | null;
+    return {
+      sourceRowId: row.entityId,
+      saleId: payload?.saleId ?? null,
+    };
+  });
+
+  const saleIds = markers
+    .map((row) => row.saleId)
+    .filter((id): id is string => Boolean(id));
+
+  const existing = saleIds.length
+    ? await prisma.sale.findMany({
+        where: { id: { in: saleIds } },
+        select: { id: true },
+      })
+    : [];
+
+  return activeImportedSourceRowIds(
+    markers,
+    new Set(existing.map((row) => row.id)),
+  );
 }
 
 async function ensureWalkInCustomer(): Promise<{
@@ -724,8 +750,16 @@ async function main() {
     }
   }
 
-  const importStatus: BatchStatus =
-    failed > 0 ? 'ERROR' : resolveBatchStatus(newRowsImported, batch.totals.invalidRows + productIssues.length);
+  const importStatus = resolveImportStatus({
+    failed,
+    newRowsImported,
+    alreadyImported: duplicatesSkipped,
+    invalidRows: batch.totals.invalidRows + productIssues.length,
+  });
+  const status: BatchStatus =
+    failed === 0 && groupsSkipped > 0 && newRowsImported === 0
+      ? 'PASS'
+      : importStatus;
 
   printBatchImportReport({
     sourceFile: sourceFileLabel,
@@ -746,16 +780,10 @@ async function main() {
     cashAmount: cashAmount.toFixed(2),
     productIssues,
     parseIssues: batch.issues,
-    status: groupsSkipped > 0 && newRowsImported === 0 && failed === 0 ? 'PASS' : importStatus,
+    status,
   });
 
-  if (failed > 0) {
-    process.exitCode = 1;
-  } else {
-    process.exitCode = resolveExitCode(
-      batch.totals.invalidRows + productIssues.length > 0 ? 'WARNING' : 'PASS',
-    );
-  }
+  process.exitCode = resolveExitCode(status);
 }
 
 main()

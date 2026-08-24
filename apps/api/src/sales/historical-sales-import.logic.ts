@@ -472,6 +472,33 @@ export function groupHistoricalSales(rows: ParsedSalesRow[]): SalesGroup[] {
   );
 }
 
+export function activeImportedSourceRowIds(
+  markers: Array<{ sourceRowId: string; saleId: string | null | undefined }>,
+  existingSaleIds: Set<string>,
+): Set<string> {
+  const active = new Set<string>();
+  for (const marker of markers) {
+    if (marker.saleId && existingSaleIds.has(marker.saleId)) {
+      active.add(marker.sourceRowId);
+    }
+  }
+  return active;
+}
+
+export function resolveImportStatus(input: {
+  failed: number;
+  newRowsImported: number;
+  alreadyImported: number;
+  invalidRows: number;
+}): BatchStatus {
+  if (input.failed > 0) return 'ERROR';
+  if (input.newRowsImported > 0 && input.invalidRows > 0) return 'WARNING';
+  if (input.newRowsImported > 0) return 'PASS';
+  if (input.alreadyImported > 0) return 'PASS';
+  if (input.invalidRows > 0) return 'WARNING';
+  return 'ERROR';
+}
+
 export function filterNewRows(
   rows: ParsedSalesRow[],
   importedSourceRowIds: Set<string>,

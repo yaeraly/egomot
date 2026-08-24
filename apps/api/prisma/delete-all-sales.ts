@@ -14,6 +14,21 @@ import { rebuildInventoryFromReceiptMovements } from '../src/inventory/rebuild-i
 
 const prisma = new PrismaClient();
 
+const HISTORICAL_IMPORT_AUDIT_ACTIONS = [
+  'HISTORICAL_SALE_ITEM_IMPORTED',
+  'HISTORICAL_SALE_IMPORTED',
+] as const;
+
+async function deleteHistoricalImportAuditLogs(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0] | PrismaClient = prisma,
+) {
+  return tx.auditLog.deleteMany({
+    where: {
+      action: { in: [...HISTORICAL_IMPORT_AUDIT_ACTIONS] },
+    },
+  });
+}
+
 type SalesDeleteCounts = {
   sales: number;
   saleItems: number;
@@ -243,6 +258,8 @@ async function deleteAllSalesData() {
 
     await tx.sale.deleteMany();
 
+    await deleteHistoricalImportAuditLogs(tx);
+
     const restored = await restoreInventoryFromRemainingLedger(tx);
     return restored;
   });
@@ -280,6 +297,7 @@ async function main() {
   console.log('  - Sale Returns and Sale Return Items');
   console.log('  - Sale-generated InventoryMovements (referenceType = SALE)');
   console.log('  - Sales');
+  console.log('  - Historical import audit logs (so the same TSV can be imported again)');
   console.log('');
   console.log('Inventory.quantity will then be rebuilt from remaining PURCHASE_RECEIPT movements (WAC).');
   console.log('FIFO is not implemented. Sale movements are reversed via the remaining ledger, not a raw +soldQty bump.');
@@ -303,10 +321,12 @@ async function main() {
   }
 
   if (preSalesCounts.sales === 0 && preSalesCounts.saleInventoryMovements === 0) {
-    printSection('SALES ALREADY EMPTY — REBUILDING INVENTORY FROM PURCHASE LEDGER');
+    printSection('SALES ALREADY EMPTY — CLEARING IMPORT MARKERS AND REBUILDING INVENTORY');
+    const deletedLogs = await deleteHistoricalImportAuditLogs();
     const restoredOnly = await prisma.$transaction((tx) =>
       restoreInventoryFromRemainingLedger(tx),
     );
+    console.log(`Historical import audit logs cleared: ${deletedLogs.count}`);
     console.log(`Inventory SKUs rebuilt: ${restoredOnly.length}`);
     console.log(
       `Inventory qty after restore: ${restoredOnly.reduce((sum, row) => sum + Number(row.quantity), 0)}`,

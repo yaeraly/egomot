@@ -5,6 +5,7 @@ import {
   FINAL_EXPECTED_SOURCE_ROWS,
   FINAL_EXPECTED_TOTAL_AMOUNT_KGS,
   FINAL_EXPECTED_TOTAL_QUANTITY,
+  activeImportedSourceRowIds,
   filterNewRows,
   groupHistoricalSales,
   normalizePhoneDigits,
@@ -12,6 +13,7 @@ import {
   parseHistoricalSalesTsv,
   resolveBatchStatus,
   resolveHistoricalCustomer,
+  resolveImportStatus,
   resolveProductName,
   resolveValidateExitCode,
   validateFinalHistoricalSales,
@@ -324,5 +326,83 @@ describe('historical-sales-import.logic', () => {
     );
     expect(second.newRows).toHaveLength(0);
     expect(second.duplicatesSkipped).toBe(1);
+  });
+
+  it('treats a source row as new after its imported Sale was deleted', () => {
+    const content = '5/14/2026\t0507 535 337\tProduct A\t1.00\t100.00\n';
+    const batch = validateHistoricalSalesBatch(content, 'historical-sales.tsv');
+    const staleMarkers = batch.parsed.map((row) => ({
+      sourceRowId: row.sourceRowId,
+      saleId: 'deleted-sale',
+    }));
+
+    const imported = activeImportedSourceRowIds(staleMarkers, new Set());
+    const { newRows, duplicatesSkipped } = filterNewRows(batch.parsed, imported);
+
+    expect(imported.size).toBe(0);
+    expect(newRows).toHaveLength(1);
+    expect(duplicatesSkipped).toBe(0);
+    expect(
+      resolveImportStatus({
+        failed: 0,
+        newRowsImported: newRows.length,
+        alreadyImported: duplicatesSkipped,
+        invalidRows: 0,
+      }),
+    ).toBe('PASS');
+  });
+
+  it('still skips a source row when its imported Sale still exists', () => {
+    const content = '5/14/2026\t0507 535 337\tProduct A\t1.00\t100.00\n';
+    const batch = validateHistoricalSalesBatch(content, 'historical-sales.tsv');
+    const markers = batch.parsed.map((row) => ({
+      sourceRowId: row.sourceRowId,
+      saleId: 'existing-sale',
+    }));
+
+    const imported = activeImportedSourceRowIds(markers, new Set(['existing-sale']));
+    const { newRows, duplicatesSkipped } = filterNewRows(batch.parsed, imported);
+
+    expect(imported.size).toBe(1);
+    expect(newRows).toHaveLength(0);
+    expect(duplicatesSkipped).toBe(1);
+    expect(
+      resolveImportStatus({
+        failed: 0,
+        newRowsImported: 0,
+        alreadyImported: duplicatesSkipped,
+        invalidRows: 0,
+      }),
+    ).toBe('PASS');
+  });
+
+  it('ignores leftover import markers that have no saleId', () => {
+    const imported = activeImportedSourceRowIds(
+      [{ sourceRowId: 'historical-row|file|L1', saleId: null }],
+      new Set(['some-sale']),
+    );
+    expect(imported.size).toBe(0);
+  });
+
+  it('marks a re-run as PASS when every valid row is already attached to an existing Sale', () => {
+    expect(
+      resolveImportStatus({
+        failed: 0,
+        newRowsImported: 0,
+        alreadyImported: 331,
+        invalidRows: 0,
+      }),
+    ).toBe('PASS');
+  });
+
+  it('marks a failed import as ERROR when nothing was imported and nothing was already present', () => {
+    expect(
+      resolveImportStatus({
+        failed: 0,
+        newRowsImported: 0,
+        alreadyImported: 0,
+        invalidRows: 0,
+      }),
+    ).toBe('ERROR');
   });
 });
