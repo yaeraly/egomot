@@ -6,9 +6,11 @@
  *   npm run sales:delete-all -- --confirm # execute deletion
  */
 import {
+  InventoryMovementType,
   InventoryReferenceType,
   PrismaClient,
 } from '@prisma/client';
+import { rebuildInventoryFromReceiptMovements } from '../src/inventory/rebuild-inventory-from-ledger';
 
 const prisma = new PrismaClient();
 
@@ -165,8 +167,61 @@ function printPreservedCounts(label: string, counts: PreservedCounts) {
   console.log(`Non-sale financial transactions:     ${counts.nonSaleFinancialTransactions}`);
 }
 
+async function restoreInventoryFromRemainingLedger(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+) {
+  const [receiptMovements, inventoryRows] = await Promise.all([
+    tx.inventoryMovement.findMany({
+      where: {
+        type: InventoryMovementType.PURCHASE_RECEIPT,
+        referenceType: InventoryReferenceType.PURCHASE_RECEIPT,
+      },
+      select: {
+        productId: true,
+        quantity: true,
+        unitCost: true,
+        transactionDate: true,
+        createdAt: true,
+      },
+      orderBy: [{ transactionDate: 'asc' }, { createdAt: 'asc' }],
+    }),
+    tx.inventory.findMany({ select: { productId: true } }),
+  ]);
+
+  const productIds = Array.from(
+    new Set([
+      ...inventoryRows.map((row) => row.productId),
+      ...receiptMovements.map((row) => row.productId),
+    ]),
+  );
+
+  const snapshots = rebuildInventoryFromReceiptMovements(
+    receiptMovements,
+    productIds,
+  );
+
+  for (const snapshot of snapshots) {
+    await tx.inventory.upsert({
+      where: { productId: snapshot.productId },
+      update: {
+        quantity: snapshot.quantity,
+        averageUnitCostKgs: snapshot.averageUnitCostKgs,
+        totalValueKgs: snapshot.totalValueKgs,
+      },
+      create: {
+        productId: snapshot.productId,
+        quantity: snapshot.quantity,
+        averageUnitCostKgs: snapshot.averageUnitCostKgs,
+        totalValueKgs: snapshot.totalValueKgs,
+      },
+    });
+  }
+
+  return snapshots;
+}
+
 async function deleteAllSalesData() {
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     await tx.financialTransaction.deleteMany({
       where: { saleId: { not: null } },
     });
@@ -187,6 +242,9 @@ async function deleteAllSalesData() {
     });
 
     await tx.sale.deleteMany();
+
+    const restored = await restoreInventoryFromRemainingLedger(tx);
+    return restored;
   });
 }
 
@@ -222,6 +280,9 @@ async function main() {
   console.log('  - Sale Returns and Sale Return Items');
   console.log('  - Sale-generated InventoryMovements (referenceType = SALE)');
   console.log('  - Sales');
+  console.log('');
+  console.log('Inventory.quantity will then be rebuilt from remaining PURCHASE_RECEIPT movements (WAC).');
+  console.log('FIFO is not implemented. Sale movements are reversed via the remaining ledger, not a raw +soldQty bump.');
 
   printSection('RECORDS THAT WILL NOT BE DELETED');
   console.log('  - Products');
@@ -241,15 +302,25 @@ async function main() {
     return;
   }
 
-  if (preSalesCounts.sales === 0) {
-    printSection('NOTHING TO DELETE');
-    console.log('Sales table is already empty.');
+  if (preSalesCounts.sales === 0 && preSalesCounts.saleInventoryMovements === 0) {
+    printSection('SALES ALREADY EMPTY — REBUILDING INVENTORY FROM PURCHASE LEDGER');
+    const restoredOnly = await prisma.$transaction((tx) =>
+      restoreInventoryFromRemainingLedger(tx),
+    );
+    console.log(`Inventory SKUs rebuilt: ${restoredOnly.length}`);
+    console.log(
+      `Inventory qty after restore: ${restoredOnly.reduce((sum, row) => sum + Number(row.quantity), 0)}`,
+    );
     console.log('Status: PASS');
     return;
   }
 
-  printSection('DELETING SALES DATA');
-  await deleteAllSalesData();
+  printSection('DELETING SALES DATA AND RESTORING INVENTORY');
+  const restored = await deleteAllSalesData();
+  const restoredQty = restored.reduce(
+    (sum, row) => sum + Number(row.quantity),
+    0,
+  );
 
   const { salesCounts: postSalesCounts, preserved: postPreserved, salesZero } =
     await verifyPostDelete();
@@ -274,6 +345,8 @@ async function main() {
   console.log(
     `Finance accounts still exist:        ${postPreserved.paymentAccounts > 0 ? 'YES' : 'NO'}`,
   );
+  console.log(`Inventory SKUs rebuilt:            ${restored.length}`);
+  console.log(`Inventory qty after restore:       ${restoredQty}`);
   console.log(`Status: ${salesZero ? 'PASS' : 'FAILED'}`);
 
   if (!salesZero) {

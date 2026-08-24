@@ -39,6 +39,35 @@ export function computeInventoryAfterSale(params: {
   };
 }
 
+/** Reverse a SALE stock-out using the existing WAC ledger values. */
+export function computeInventoryAfterSaleReverse(params: {
+  currentQuantity: Decimal.Value;
+  currentTotalValueKgs: Decimal.Value;
+  soldQuantity: Decimal.Value;
+  saleTotalCostKgs: Decimal.Value;
+}) {
+  const prevQty = roundQty(params.currentQuantity);
+  const soldQty = roundQty(params.soldQuantity);
+  const prevValue = roundMoney(params.currentTotalValueKgs);
+  const restoredValue = roundMoney(params.saleTotalCostKgs);
+
+  if (soldQty.lte(0)) {
+    throw new SaleValidationError(['Количество возврата на склад должно быть больше нуля']);
+  }
+
+  const newQty = roundQty(prevQty.plus(soldQty));
+  const newValue = roundMoney(prevValue.plus(restoredValue));
+
+  return {
+    previousQuantity: prevQty,
+    newQuantity: newQty,
+    unitCost: soldQty.gt(0) ? roundUnitCost(restoredValue.div(soldQty)) : roundUnitCost(0),
+    totalCost: restoredValue,
+    newTotalValueKgs: newValue,
+    averageUnitCostKgs: newQty.gt(0) ? roundUnitCost(newValue.div(newQty)) : roundUnitCost(0),
+  };
+}
+
 export function calculateSaleDebt(totalAmountKgs: Decimal.Value, paidAmountKgs: Decimal.Value) {
   const total = roundMoney(totalAmountKgs);
   const paid = roundMoney(paidAmountKgs);
