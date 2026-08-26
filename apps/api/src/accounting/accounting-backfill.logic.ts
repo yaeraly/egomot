@@ -996,7 +996,7 @@ export function formatHistoricalBackfillReport(
     'Operational wallet total:',
     t.operationalWalletStatedKgs,
     '',
-    'Cash reconciliation gap (projected accounting cash vs wallet):',
+    'Cash reconciliation gap:',
     t.cashReconciliationGapKgs,
     '',
     'Opening capital vs operational wallet gap (not closed by a cash plug):',
