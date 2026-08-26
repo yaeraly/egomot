@@ -125,6 +125,33 @@ export function resolveHistoricalCustomer(
   };
 }
 
+export type HistoricalImportClientResolution =
+  | { kind: 'walk-in'; reason: 'roznichny' | 'unknown-phone'; groupToken: typeof WALK_IN_GROUP_TOKEN }
+  | { kind: 'phone'; phoneDigits: string }
+  | { kind: 'invalid'; message: string };
+
+/**
+ * Client assignment for historical import.
+ * Grouping stays phone+date. Unknown phones still group by their digits,
+ * but the Sale.client falls back to Walk-in Customer when the phone is not in Clients.
+ */
+export function resolveHistoricalImportClient(params: {
+  customerField: string;
+  knownPhoneDigits: ReadonlySet<string>;
+}): HistoricalImportClientResolution {
+  const resolved = resolveHistoricalCustomer(params.customerField);
+  if (resolved.kind === 'invalid') {
+    return { kind: 'invalid', message: resolved.message };
+  }
+  if (resolved.kind === 'walk-in') {
+    return { kind: 'walk-in', reason: 'roznichny', groupToken: WALK_IN_GROUP_TOKEN };
+  }
+  if (params.knownPhoneDigits.has(resolved.phoneDigits)) {
+    return { kind: 'phone', phoneDigits: resolved.phoneDigits };
+  }
+  return { kind: 'walk-in', reason: 'unknown-phone', groupToken: WALK_IN_GROUP_TOKEN };
+}
+
 export function normalizeHistoricalField(value: string): string {
   let trimmed = value.trim();
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) {

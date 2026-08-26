@@ -7,6 +7,8 @@ import {
   PurchaseReceiptStatus,
   JournalStatus,
 } from '@prisma/client';
+import * as fs from 'fs';
+import * as path from 'path';
 import { publicDecimal } from '../common/decimal.util';
 import { moneyStr, roundMoney, dec } from '../purchases/purchase-calc';
 import {
@@ -21,12 +23,17 @@ import {
   evaluateBackfillStatus,
   isBackfillApplyAllowed,
   purchaseRecognitionAmounts,
+  BACKFILL_SALE_STATUSES,
   type BackfillEvaluationStatus,
   type BackfillPurchaseInput,
   type BackfillSaleInput,
   type HistoricalBackfillSnapshot,
   type PlannedBackfillJournal,
 } from './accounting-backfill.logic';
+import {
+  reconcileHistoricalSales,
+  type DbSaleLineInput,
+} from './accounting-sales-reconciliation.logic';
 import {
   remainingPayableAmount,
   payableStatusFromAmounts,
@@ -49,6 +56,19 @@ function key(sourceType: string, sourceId: string) {
   return `${sourceType}:${sourceId}`;
 }
 
+function loadHistoricalSalesTsvContent(): string {
+  const candidates = [
+    path.join(process.cwd(), 'prisma/data/historical-sales.tsv'),
+    path.join(__dirname, '../../prisma/data/historical-sales.tsv'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return fs.readFileSync(candidate, 'utf8');
+    }
+  }
+  return '';
+}
+
 export async function loadHistoricalBackfillSnapshot(
   prisma: PrismaClient,
 ): Promise<HistoricalBackfillSnapshot> {
@@ -64,11 +84,12 @@ export async function loadHistoricalBackfillSnapshot(
     postedInventoryLines,
     movementReceiptSum,
     movementSaleSum,
+    movementByType,
   ] = await Promise.all([
       prisma.sale.findMany({
         include: {
           client: true,
-          items: true,
+          items: { include: { product: true } },
           payments: { include: { paymentMethod: true, debtTransaction: true } },
           debtTransactions: true,
         },
@@ -137,6 +158,11 @@ export async function loadHistoricalBackfillSnapshot(
       }),
       prisma.inventoryMovement.aggregate({
         where: { type: InventoryMovementType.SALE },
+        _sum: { totalCost: true },
+      }),
+      prisma.inventoryMovement.groupBy({
+        by: ['type'],
+        _count: { _all: true },
         _sum: { totalCost: true },
       }),
     ]);
@@ -255,6 +281,42 @@ export async function loadHistoricalBackfillSnapshot(
     dec(postedInventoryLines._sum.creditKgs ?? 0),
   );
 
+  const reconcilableSales = sales.filter((sale) => BACKFILL_SALE_STATUSES.has(sale.status));
+  const dbLines: DbSaleLineInput[] = reconcilableSales.flatMap((sale) =>
+    sale.items.map((item) => ({
+      saleId: sale.id,
+      saleNumber: sale.number,
+      saleDate: sale.saleDate,
+      customerName: sale.client.name,
+      customerPhone: sale.client.phone,
+      productName: item.product.name,
+      quantity: publicDecimal(item.quantity),
+      unitPriceKgs: publicDecimal(item.unitPriceKgs),
+      lineTotalKgs: publicDecimal(item.lineTotalKgs),
+      idempotencyKey: sale.idempotencyKey,
+    })),
+  );
+  const dbRevenue = reconcilableSales.reduce(
+    (sum, sale) => sum.plus(dec(sale.totalAmountKgs)),
+    dec(0),
+  );
+  const salesReconciliation = reconcileHistoricalSales({
+    tsvContent: loadHistoricalSalesTsvContent(),
+    dbLines,
+    dbSaleCount: reconcilableSales.length,
+    dbRevenueKgs: moneyStr(dbRevenue),
+  });
+
+  const knownMovementTypes = new Set<string>([
+    InventoryMovementType.PURCHASE_RECEIPT,
+    InventoryMovementType.SALE,
+  ]);
+  const otherMovements = movementByType.filter((row) => !knownMovementTypes.has(row.type));
+  const movementOtherValue = otherMovements.reduce(
+    (sum, row) => sum.plus(dec(row._sum.totalCost ?? 0)),
+    dec(0),
+  );
+
   return {
     sales: saleInputs,
     purchases: purchaseInputs,
@@ -269,6 +331,13 @@ export async function loadHistoricalBackfillSnapshot(
     purchaseItemCount: String(purchaseItemCount),
     movementPurchaseReceiptValueKgs: moneyStr(movementReceiptSum._sum.totalCost ?? 0),
     movementSaleValueKgs: moneyStr(movementSaleSum._sum.totalCost ?? 0),
+    movementOtherValueKgs: moneyStr(movementOtherValue),
+    movementOtherTypes:
+      otherMovements.length > 0 ? otherMovements.map((row) => row.type).join(',') : 'none',
+    hasOpeningInventoryMovement: false,
+    hasInventoryAdjustmentMovement: false,
+    enforceSalesControlTotals: true,
+    salesReconciliation,
   };
 }
 

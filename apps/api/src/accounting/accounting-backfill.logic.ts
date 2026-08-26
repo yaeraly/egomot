@@ -1,6 +1,7 @@
 import { moneyStr, roundMoney, Decimal } from '../purchases/purchase-calc';
 import {
   FINAL_EXPECTED_SALE_ITEMS,
+  FINAL_EXPECTED_SOURCE_ROWS,
   FINAL_EXPECTED_TOTAL_AMOUNT_KGS,
   FINAL_EXPECTED_TOTAL_QUANTITY,
 } from '../sales/historical-sales-import.logic';
@@ -9,6 +10,13 @@ import {
   OPERATIONAL_WALLET_STATED_KGS,
   glCashAccountCodeForPaymentMethod,
 } from './accounting-codes';
+import {
+  SALES_RECONCILIATION_BLOCKER,
+  computeSalesControlDifference,
+  formatSalesReconciliationReport,
+  type SalesMismatchRow,
+  type SalesReconciliationResult,
+} from './accounting-sales-reconciliation.logic';
 import {
   buildCargoPayableLines,
   buildCargoPaymentLines,
@@ -30,6 +38,7 @@ export const BACKFILL_STATUS = {
   PASS: 'PASS',
   BLOCKED: 'BLOCKED',
   BLOCKED_OPENING_INVENTORY: 'BLOCKED — HISTORICAL OPENING INVENTORY REQUIRED',
+  BLOCKED_SALES_RECONCILIATION: SALES_RECONCILIATION_BLOCKER,
 } as const;
 
 export type BackfillEvaluationStatus =
@@ -37,6 +46,9 @@ export type BackfillEvaluationStatus =
 
 export const HISTORICAL_OPENING_INVENTORY_BLOCKER =
   BACKFILL_STATUS.BLOCKED_OPENING_INVENTORY;
+
+export const HISTORICAL_SALES_RECONCILIATION_BLOCKER =
+  BACKFILL_STATUS.BLOCKED_SALES_RECONCILIATION;
 
 export const BACKFILL_SALE_STATUSES = new Set(['CONFIRMED', 'COMPLETED']);
 
@@ -203,6 +215,12 @@ export type HistoricalBackfillSnapshot = {
   purchaseItemCount?: string | null;
   movementPurchaseReceiptValueKgs?: string | null;
   movementSaleValueKgs?: string | null;
+  movementOtherValueKgs?: string | null;
+  movementOtherTypes?: string | null;
+  hasOpeningInventoryMovement?: boolean;
+  hasInventoryAdjustmentMovement?: boolean;
+  enforceSalesControlTotals?: boolean;
+  salesReconciliation?: SalesReconciliationResult | null;
 };
 
 export type HistoricalBackfillPlan = {
@@ -252,6 +270,23 @@ export type HistoricalBackfillTotals = {
   importedSourceExpectedQuantity: string;
   importedSourceExpectedRevenueKgs: string;
   salesMatchImportedSource: boolean;
+  salesControlDifferenceKgs: string;
+  tsvSourceRows: string;
+  tsvQuantity: string;
+  tsvRevenueKgs: string;
+  tsvSaleGroups: string;
+  tsvFileMatchesControlTotals: boolean;
+  historicalImportedSaleCount: string;
+  nonHistoricalSaleCount: string;
+  nonHistoricalRevenueKgs: string;
+  salesMismatchRowCount: number;
+  salesMismatchRows: SalesMismatchRow[];
+  salesReconciliationReport: string;
+  enforceSalesControlTotals: boolean;
+  movementOtherValueKgs: string;
+  movementOtherTypes: string;
+  hasOpeningInventoryMovement: boolean;
+  hasInventoryAdjustmentMovement: boolean;
   operationalArKgs: string;
   glArKgs: string;
   arDifferenceKgs: string;
@@ -746,10 +781,15 @@ export function summarizeBackfillPlan(params: {
     : sumSaleQuantity(backfillableSales).toFixed(3);
   const purchaseItemCount = String(params.snapshot.purchaseItemCount ?? '0');
   const importedRevenue = roundMoney(FINAL_EXPECTED_TOTAL_AMOUNT_KGS);
+  const recon = params.snapshot.salesReconciliation ?? null;
   const salesMatchImportedSource =
     Number(saleItemCount) === FINAL_EXPECTED_SALE_ITEMS &&
     new Decimal(saleQuantity).eq(new Decimal(FINAL_EXPECTED_TOTAL_QUANTITY)) &&
     revenue.eq(importedRevenue);
+  const salesControlDifferenceKgs = recon
+    ? recon.controlDifferenceKgs
+    : computeSalesControlDifference(revenue);
+  const enforceSalesControlTotals = params.snapshot.enforceSalesControlTotals === true;
 
   return {
     saleCount: String(backfillableSales.length),
@@ -793,6 +833,24 @@ export function summarizeBackfillPlan(params: {
     importedSourceExpectedQuantity: FINAL_EXPECTED_TOTAL_QUANTITY,
     importedSourceExpectedRevenueKgs: moneyStr(importedRevenue),
     salesMatchImportedSource,
+    salesControlDifferenceKgs,
+    tsvSourceRows: String(recon?.tsvRows ?? FINAL_EXPECTED_SOURCE_ROWS),
+    tsvQuantity: recon?.tsvQuantity ?? FINAL_EXPECTED_TOTAL_QUANTITY,
+    tsvRevenueKgs: recon?.tsvRevenueKgs ?? moneyStr(importedRevenue),
+    tsvSaleGroups: String(recon?.tsvSaleGroups ?? ''),
+    tsvFileMatchesControlTotals: recon?.tsvFileMatchesControlTotals ?? true,
+    historicalImportedSaleCount: String(recon?.historicalImportedSaleCount ?? ''),
+    nonHistoricalSaleCount: String(recon?.nonHistoricalSaleCount ?? ''),
+    nonHistoricalRevenueKgs: recon?.nonHistoricalRevenueKgs ?? '0.00',
+    salesMismatchRowCount: recon?.mismatchRows.length ?? 0,
+    salesMismatchRows: recon?.mismatchRows ?? [],
+    salesReconciliationReport: recon ? formatSalesReconciliationReport(recon) : '',
+    enforceSalesControlTotals,
+    movementOtherValueKgs: moneyStr(params.snapshot.movementOtherValueKgs ?? 0),
+    movementOtherTypes: params.snapshot.movementOtherTypes ?? 'none',
+    hasOpeningInventoryMovement: params.snapshot.hasOpeningInventoryMovement === true,
+    hasInventoryAdjustmentMovement:
+      params.snapshot.hasInventoryAdjustmentMovement === true,
     operationalArKgs: moneyStr(operationalAr),
     glArKgs: moneyStr(glAr),
     arDifferenceKgs: moneyStr(glAr.minus(operationalAr)),
@@ -817,6 +875,19 @@ export function evaluateBackfillStatus(
   }
   const selection = selectionFromMode(mode);
   const fullInventoryRecon = selection.sales && selection.purchases && selection.cargo;
+  let salesReconciliationGap = false;
+  if (selection.sales && t.enforceSalesControlTotals) {
+    const salesMismatch =
+      !t.salesMatchImportedSource ||
+      !roundMoney(t.salesControlDifferenceKgs).eq(0) ||
+      t.tsvFileMatchesControlTotals === false;
+    if (salesMismatch) {
+      salesReconciliationGap = true;
+      blockers.push(
+        `${HISTORICAL_SALES_RECONCILIATION_BLOCKER}: DB revenue ${t.revenueKgs} vs control ${t.importedSourceExpectedRevenueKgs} (difference ${t.salesControlDifferenceKgs}). No sales or journals were modified.`,
+      );
+    }
+  }
   let openingInventoryGap = false;
   if (fullInventoryRecon) {
     if (!roundMoney(t.inventoryDifferenceKgs).eq(0)) {
@@ -841,10 +912,13 @@ export function evaluateBackfillStatus(
   }
   const openingGapIsOnlyBlocker =
     openingInventoryGap &&
+    !salesReconciliationGap &&
     blockers.length === 1 &&
     blockers[0].startsWith(HISTORICAL_OPENING_INVENTORY_BLOCKER);
   let status: BackfillEvaluationStatus = BACKFILL_STATUS.PASS;
-  if (openingGapIsOnlyBlocker) {
+  if (salesReconciliationGap) {
+    status = BACKFILL_STATUS.BLOCKED_SALES_RECONCILIATION;
+  } else if (openingGapIsOnlyBlocker) {
     status = BACKFILL_STATUS.BLOCKED_OPENING_INVENTORY;
   } else if (blockers.length > 0) {
     status = BACKFILL_STATUS.BLOCKED;
@@ -891,7 +965,12 @@ export function formatHistoricalBackfillReport(
     'Matches imported historical TSV totals:',
     t.salesMatchImportedSource ? 'YES' : 'NO',
     '',
+    'Sales control-total difference:',
+    t.salesControlDifferenceKgs,
+    '',
     'Sales were not modified.',
+    '',
+    t.salesReconciliationReport || '=== SALES RECONCILIATION ===\n(no TSV/DB line comparison loaded)',
     '',
     '',
     '=== PURCHASE VALIDATION ===',
@@ -957,6 +1036,18 @@ export function formatHistoricalBackfillReport(
     '',
     'Movement-derived ending (receipts - sales):',
     t.movementDerivedEndingKgs,
+    '',
+    'Other inventory movement types/value:',
+    `${t.movementOtherTypes} / ${t.movementOtherValueKgs}`,
+    '',
+    'Opening inventory movement exists:',
+    t.hasOpeningInventoryMovement ? 'YES' : 'NO',
+    '',
+    'Inventory adjustment movements exist:',
+    t.hasInventoryAdjustmentMovement ? 'YES' : 'NO',
+    '',
+    'Automatic opening inventory plug created:',
+    'NO',
     '',
     'Root cause of previous GL Inventory = 0:',
     'Account 1200 has no posted historical journals, so posted GL Inventory is 0.00.',
