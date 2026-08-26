@@ -4,10 +4,17 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { formatDate, formatBusinessDate, money } from '@/lib/format';
+import { formatDate, formatBusinessDate, moneySom } from '@/lib/format';
 import { AuditLog, Purchase, PurchaseStatus, STATUS_LABELS } from '@/lib/types';
 import { Badge, Button, Card, PageHeader, Select } from '@/components/ui';
 import { PurchaseSummary } from '@/components/PurchaseSummary';
+import { PurchaseLogisticsSection } from '@/components/PurchaseLogisticsSection';
+import { SupplierPaymentModal } from '@/components/SupplierPaymentModal';
+import { PAYABLE_STATUS_LABELS } from '@/lib/finance-labels';
+import {
+  type CompanyPaymentAccount,
+  supplierPaymentTargetFromPurchase,
+} from '@/lib/supplier-payment';
 
 export default function PurchaseViewPage() {
   const { id } = useParams<{ id: string }>();
@@ -15,6 +22,8 @@ export default function PurchaseViewPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [status, setStatus] = useState<PurchaseStatus>('DRAFT');
   const [busy, setBusy] = useState(false);
+  const [accounts, setAccounts] = useState<CompanyPaymentAccount[]>([]);
+  const [supplierPaymentOpen, setSupplierPaymentOpen] = useState(false);
 
   async function load() {
     const data = await api<Purchase>(`/purchases/${id}`);
@@ -26,6 +35,7 @@ export default function PurchaseViewPage() {
 
   useEffect(() => {
     void load();
+    void api<CompanyPaymentAccount[]>('/accounting/company-accounts').then(setAccounts);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -48,6 +58,8 @@ export default function PurchaseViewPage() {
     purchase.status !== 'DRAFT' &&
     purchase.status !== 'RECEIVED' &&
     purchase.status !== 'RECEIVED_WITH_DISCREPANCY';
+  const supplierPaymentTarget = supplierPaymentTargetFromPurchase(purchase);
+  const canPaySupplier = supplierPaymentTarget !== null;
 
   return (
     <div className="space-y-4">
@@ -84,11 +96,16 @@ export default function PurchaseViewPage() {
           productName: item.product?.name,
         }))}
       />
+      <PurchaseLogisticsSection purchase={purchase} onChanged={load} />
       <Card className="grid gap-2 sm:grid-cols-2">
-        <p className="sm:col-span-2 font-semibold">Оплата поставщику</p>
-        <p>Итого: {money(purchase.estimatedTotalLandedCostKgs, 'KGS')}</p>
-        <p>Оплачено: {money(purchase.paidAmountKgs ?? '0', 'KGS')}</p>
-        <p>Остаток долга: {money(purchase.unpaidAmountKgs ?? '0', 'KGS')}</p>
+        <p className="sm:col-span-2 font-semibold">Расчёты и долги</p>
+        <p>Оплачено поставщику: {moneySom(purchase.supplierPaidAmountKgs ?? '0')}</p>
+        <p>Долг поставщику: {moneySom(purchase.supplierUnpaidAmountKgs ?? '0')}</p>
+        <p>Оплачено за логистику: {moneySom(purchase.logisticsPaidAmountKgs ?? '0')}</p>
+        <p>Долг за логистику: {moneySom(purchase.logisticsUnpaidAmountKgs ?? '0')}</p>
+        <p className="sm:col-span-2 font-semibold">
+          Общая задолженность: {moneySom(purchase.totalUnpaidAmountKgs ?? purchase.unpaidAmountKgs ?? '0')}
+        </p>
         <p>
           Статус:{' '}
           <Badge
@@ -100,10 +117,25 @@ export default function PurchaseViewPage() {
                   : 'red'
             }
           >
-            {purchase.payableStatus ?? 'UNPAID'}
+            {PAYABLE_STATUS_LABELS[purchase.payableStatus ?? 'UNPAID'] ?? purchase.payableStatus}
           </Badge>
         </p>
+        {canPaySupplier ? (
+          <div className="sm:col-span-2">
+            <Button variant="secondary" onClick={() => setSupplierPaymentOpen(true)}>
+              Оплатить поставщику
+            </Button>
+          </div>
+        ) : null}
       </Card>
+
+      <SupplierPaymentModal
+        open={supplierPaymentOpen}
+        target={supplierPaymentTarget}
+        accounts={accounts}
+        onClose={() => setSupplierPaymentOpen(false)}
+        onSuccess={load}
+      />
 
       <Card className="space-y-3">
         <p className="font-semibold">Статус</p>
