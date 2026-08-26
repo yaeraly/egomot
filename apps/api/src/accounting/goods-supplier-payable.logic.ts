@@ -51,7 +51,7 @@ export function sumVerifiedSupplierPaidKgs(params: {
   purchasePaymentKgs?: Decimal.Value[];
   paidAtReceiptKgs?: Decimal.Value;
 }): Decimal {
-  const payments = (params.purchasePaymentKgs ?? []).reduce(
+  const payments = (params.purchasePaymentKgs ?? []).reduce<Decimal>(
     (sum, row) => sum.plus(roundMoney(row)),
     roundMoney(0),
   );
@@ -107,11 +107,11 @@ export function settlementFromSupplierPayables(
       supplierPayableStatus: 'UNPAID',
     };
   }
-  const paid = payables.reduce(
+  const paid = payables.reduce<Decimal>(
     (sum, row) => sum.plus(roundMoney(row.paidAmountKgs)),
     roundMoney(0),
   );
-  const remaining = payables.reduce(
+  const remaining = payables.reduce<Decimal>(
     (sum, row) => sum.plus(roundMoney(row.remainingAmountKgs)),
     roundMoney(0),
   );
