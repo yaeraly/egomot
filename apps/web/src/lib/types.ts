@@ -113,11 +113,20 @@ export interface PurchaseItem {
 export interface PurchaseLogistics {
   id: string;
   type: LogisticsType;
+  expenseDate?: string | null;
+  payeeName?: string | null;
   amount: string;
   currency: Currency;
   exchangeRate: string | null;
   amountKgs: string;
+  paidAmountKgs?: string;
+  remainingAmountKgs?: string;
+  status?: 'UNPAID' | 'PARTIAL' | 'PAID';
+  paymentAccountId?: string | null;
+  paymentAccount?: { id: string; name: string; paymentMethodCode?: string | null } | null;
+  paidAt?: string | null;
   comment: string | null;
+  journalId?: string | null;
 }
 
 export interface Purchase {
@@ -144,6 +153,11 @@ export interface Purchase {
   paidAmountKgs?: string;
   unpaidAmountKgs?: string;
   payableStatus?: 'UNPAID' | 'PARTIAL' | 'PAID';
+  supplierPaidAmountKgs?: string;
+  supplierUnpaidAmountKgs?: string;
+  logisticsPaidAmountKgs?: string;
+  logisticsUnpaidAmountKgs?: string;
+  totalUnpaidAmountKgs?: string;
   items?: PurchaseItem[];
   logistics?: PurchaseLogistics[];
   createdAt: string;
@@ -249,6 +263,7 @@ export interface FinanceDashboard {
   accountsReceivableKgs: string;
   supplierDebtKgs: string;
   cargoDebtKgs: string;
+  transportDebtKgs?: string;
   salesRevenueKgs: string;
   cogsKgs: string;
   grossProfitKgs: string;
@@ -397,9 +412,9 @@ export const STATUS_LABELS: Record<PurchaseStatus, string> = {
 };
 
 export const PAYABLE_STATUS_LABELS: Record<'UNPAID' | 'PARTIAL' | 'PAID', string> = {
-  UNPAID: 'UNPAID',
-  PARTIAL: 'PARTIAL',
-  PAID: 'PAID',
+  UNPAID: 'Не оплачено',
+  PARTIAL: 'Частично оплачено',
+  PAID: 'Оплачено',
 };
 
 export const RECEIPT_STATUS_LABELS: Record<PurchaseReceiptStatus, string> = {
@@ -415,10 +430,10 @@ export const DISCREPANCY_LABELS: Record<ReceiptDiscrepancyType, string> = {
 };
 
 export const LOGISTICS_LABELS: Record<LogisticsType, string> = {
-  CHINA_INTERNAL_TRANSPORT: 'Внутренняя доставка (Китай)',
-  CARGO: 'Карго',
-  KYRGYZSTAN_INTERNAL_TRANSPORT: 'Внутренняя доставка (КР)',
-  OTHER: 'Прочие расходы',
+  CHINA_INTERNAL_TRANSPORT: 'Транспорт по Китаю',
+  CARGO: 'Карго Китай → Кыргызстан',
+  KYRGYZSTAN_INTERNAL_TRANSPORT: 'Транспорт по Кыргызстану',
+  OTHER: 'Прочие логистические расходы',
 };
 
 export const UNITS = ['шт', 'кг', 'кор', 'пар', 'набор', 'уп', 'м'];
