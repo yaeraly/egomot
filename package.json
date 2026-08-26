@@ -1,0 +1,30 @@
+{
+  "name": "egomot",
+  "private": true,
+  "description": "Egomot business management system — Phase 1: OWNER, products, suppliers, China purchases",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "setup": "bash scripts/dev-setup.sh",
+    "dev": "npm run dev:api & npm run dev:web",
+    "dev:api": "npm run start:dev -w api",
+    "dev:web": "bash scripts/dev-web.sh",
+    "build": "npm run build -w api && npm run build -w web",
+    "test": "npm run test -w api",
+    "db:up": "docker compose up -d postgres",
+    "db:migrate": "npm run prisma:migrate -w api",
+    "db:migrate:deploy": "npm run prisma:migrate:deploy -w api",
+    "db:seed": "npm run prisma:seed -w api",
+    "db:generate": "npm run prisma:generate -w api",
+    "import:historical-sales": "npm run import:historical-sales -w api --",
+    "import:historical-purchases": "npm run import:historical-purchases -w api --",
+    "sales:delete-all": "npm run sales:delete-all -w api --",
+    "report:inventory-reconciliation": "npm run report:inventory-reconciliation -w api",
+    "accounting:backfill": "npm run accounting:backfill -w api --"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

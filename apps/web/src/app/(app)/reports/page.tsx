@@ -1,0 +1,418 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { api } from '@/lib/api';
+import { defaultCustomRange, DateRangeFilter } from '@/components/DateRangeFilter';
+import { Card, PageHeader } from '@/components/ui';
+import { formatBusinessDate, money, qty } from '@/lib/format';
+import { DatePresetValue, monthInputRange } from '@/lib/date';
+import { PurchaseReport, SalesReport } from '@/lib/types';
+
+type Tab = 'purchases' | 'receipts' | 'movements' | 'sales';
+
+interface ReceiptReportRow {
+  warehouseReceiptDate: string | null;
+  purchaseNumber: string;
+  purchaseDate: string | null;
+  supplierName: string;
+  totalOrderedQuantity: string;
+  totalReceivedQuantity: string;
+  totalShortage: string;
+  totalExcess: string;
+  totalTransportKgs: string;
+  totalLandedCostKgs: string;
+  receivedByName: string;
+  number: string;
+  createdAt: string;
+}
+
+interface MovementReportRow {
+  transactionDate: string | null;
+  productName: string;
+  productCode: string;
+  typeLabel: string;
+  quantity: string;
+  unitCost: string;
+  totalCost: string;
+  balanceAfter: string;
+  referenceId: string;
+  employeeName: string;
+  createdAt: string;
+}
+
+export default function ReportsPage() {
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get('tab');
+  const [tab, setTab] = useState<Tab>(
+    initialTab === 'sales'
+      ? 'sales'
+      : initialTab === 'receipts'
+        ? 'receipts'
+        : initialTab === 'movements'
+          ? 'movements'
+          : initialTab === 'purchases'
+            ? 'purchases'
+            : 'purchases',
+  );
+  const [preset, setPreset] = useState<DatePresetValue>('month');
+  const [{ from, to }, setRange] = useState(defaultCustomRange);
+  const [purchaseReport, setPurchaseReport] = useState<PurchaseReport | null>(null);
+  const [receiptRows, setReceiptRows] = useState<ReceiptReportRow[]>([]);
+  const [movementRows, setMovementRows] = useState<MovementReportRow[]>([]);
+  const [salesReport, setSalesReport] = useState<SalesReport | null>(null);
+  const [missing, setMissing] = useState<{ summary: { purchasesWithoutDate: number; movementsWithoutTransactionDate: number } } | null>(null);
+
+  const query = useMemo(() => {
+    const params = new URLSearchParams();
+    if (preset === 'custom') {
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+    } else {
+      params.set('preset', preset);
+    }
+    return params.toString() ? `?${params}` : '';
+  }, [preset, from, to]);
+
+  useEffect(() => {
+    void api<{ summary: { purchasesWithoutDate: number; movementsWithoutTransactionDate: number } }>(
+      '/reports/missing-business-dates',
+    ).then(setMissing);
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'purchases') {
+      void api<PurchaseReport>(`/reports/purchases${query}`).then(setPurchaseReport);
+    } else if (tab === 'receipts') {
+      void api<{ rows: ReceiptReportRow[] }>(`/reports/receipts${query}`).then((data) => setReceiptRows(data.rows));
+    } else if (tab === 'movements') {
+      void api<{ rows: MovementReportRow[] }>(`/reports/inventory-movements${query}`).then((data) =>
+        setMovementRows(data.rows),
+      );
+    } else {
+      void api<SalesReport>(`/reports/sales${query}`).then(setSalesReport);
+    }
+  }, [tab, query]);
+
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title={
+          tab === 'sales'
+            ? 'Отчёт по продажам'
+            : tab === 'purchases'
+              ? 'Отчёт по закупкам'
+              : 'Отчёты'
+        }
+        subtitle={
+          tab === 'sales'
+            ? 'Продажи по месяцам за выбранный период'
+            : tab === 'purchases'
+              ? 'Закупки по месяцам за выбранный период'
+              : 'Фильтрация по фактическим бизнес-датам'
+        }
+      />
+
+      {missing && (missing.summary.purchasesWithoutDate > 0 || missing.summary.movementsWithoutTransactionDate > 0) ? (
+        <Card className="border-amber-200 bg-amber-50 text-sm">
+          <p className="font-semibold">Требуется указать исторические даты</p>
+          <p className="mt-1 text-muted">
+            Закупок без даты закупки: {missing.summary.purchasesWithoutDate}. Движений без transactionDate:{' '}
+            {missing.summary.movementsWithoutTransactionDate}.
+          </p>
+        </Card>
+      ) : null}
+
+      <div className="flex flex-wrap gap-2">
+        {(
+          [
+            ['purchases', 'Закупки'],
+            ['receipts', 'Приходы'],
+            ['movements', 'Движения'],
+            ['sales', 'Продажи'],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={`min-h-11 rounded-xl px-4 text-sm font-semibold ${
+              tab === key ? 'bg-brand text-white' : 'border border-line bg-white'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+        <button
+          onClick={() => {
+            setPreset('custom');
+            setRange(monthInputRange(2026, 3));
+            setTab('purchases');
+          }}
+          className="min-h-11 rounded-xl border border-line bg-white px-4 text-sm font-semibold"
+        >
+          Март 2026
+        </button>
+      </div>
+
+      <DateRangeFilter
+        preset={preset}
+        from={from}
+        to={to}
+        onPresetChange={setPreset}
+        onFromChange={(value) => setRange((s) => ({ ...s, from: value }))}
+        onToChange={(value) => setRange((s) => ({ ...s, to: value }))}
+      />
+
+      {tab === 'purchases' ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Card>
+              <p className="text-sm text-muted">Сумма закупок за период</p>
+              <p className="mt-1 text-3xl font-bold">
+                {purchaseReport ? money(purchaseReport.totals.totalAmountKgs, 'KGS') : '—'}
+              </p>
+            </Card>
+            <Card>
+              <p className="text-sm text-muted">Количество закуплено</p>
+              <p className="mt-1 text-3xl font-bold">
+                {purchaseReport ? `${qty(purchaseReport.totals.totalQuantity)} шт.` : '—'}
+              </p>
+            </Card>
+            <Card>
+              <p className="text-sm text-muted">Закупок</p>
+              <p className="mt-1 text-3xl font-bold">
+                {purchaseReport ? qty(purchaseReport.totals.purchaseCount) : '—'}
+              </p>
+            </Card>
+          </div>
+
+          {purchaseReport && purchaseReport.range ? (
+            <p className="text-sm text-muted">
+              Период: {formatBusinessDate(purchaseReport.range.from)} — {formatBusinessDate(purchaseReport.range.to)}
+            </p>
+          ) : null}
+
+          {purchaseReport && purchaseReport.products.length > 0 ? (
+            <Card>
+              <p className="font-semibold">Себестоимость по товарам за период</p>
+              <div className="mt-4 space-y-2">
+                {purchaseReport.products.map((product) => (
+                  <div
+                    key={product.productId}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line px-3 py-2 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium">{product.productName}</p>
+                      <p className="text-muted">{product.productCode}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-4 text-right">
+                      <div>
+                        <p className="text-muted">Кол-во</p>
+                        <p>{qty(product.quantity)} {product.unit}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted">Закупочная стоимость</p>
+                        <p>{money(product.purchaseCostKgs, 'KGS')}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted">Себестоимость/ед.</p>
+                        <p>{money(product.unitCostKgs, 'KGS')}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted">Сумма с логистикой</p>
+                        <p>{money(product.totalAmountKgs, 'KGS')}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          ) : null}
+
+          {!purchaseReport || purchaseReport.months.length === 0 ? (
+            <Card><p className="text-sm text-muted">Нет закупок за выбранный период</p></Card>
+          ) : (
+            purchaseReport.months.map((month) => (
+              <Card key={month.monthKey}>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-lg font-semibold capitalize">{month.monthLabel}</p>
+                    <p className="text-sm text-muted">{month.purchaseCount} закупок</p>
+                  </div>
+                  <div className="text-right text-sm">
+                    <p className="font-semibold">{money(month.totalAmountKgs, 'KGS')}</p>
+                    <p className="text-muted">{qty(month.totalQuantity)} шт.</p>
+                  </div>
+                </div>
+
+                {month.products.length > 0 ? (
+                  <div className="mt-4 space-y-2">
+                    <p className="text-sm font-semibold">По товарам</p>
+                    {month.products.map((product) => (
+                      <div
+                        key={product.productId}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line px-3 py-2 text-sm"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-medium">{product.productName}</p>
+                          <p className="text-muted">{product.productCode}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-4 text-right">
+                          <div>
+                            <p className="text-muted">Кол-во</p>
+                            <p>{qty(product.quantity)} {product.unit}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted">Закупочная стоимость</p>
+                            <p>{money(product.purchaseCostKgs, 'KGS')}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted">Себестоимость/ед.</p>
+                            <p>{money(product.unitCostKgs, 'KGS')}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted">Сумма с логистикой</p>
+                            <p>{money(product.totalAmountKgs, 'KGS')}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </Card>
+            ))
+          )}
+        </div>
+      ) : null}
+
+      {tab === 'receipts' ? (
+        <div className="space-y-3">
+          {receiptRows.length === 0 ? (
+            <Card><p className="text-sm text-muted">Нет приходов за выбранный период</p></Card>
+          ) : (
+            receiptRows.map((row) => (
+              <Card key={row.number}>
+                <div className="flex flex-wrap justify-between gap-2">
+                  <div>
+                    <p className="font-semibold">{row.number}</p>
+                    <p className="text-sm text-muted">{row.purchaseNumber} · {row.supplierName}</p>
+                  </div>
+                  <p className="text-sm">{formatBusinessDate(row.warehouseReceiptDate)}</p>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                  <div><p className="text-muted">Заказано</p><p>{qty(row.totalOrderedQuantity)}</p></div>
+                  <div><p className="text-muted">Получено</p><p>{qty(row.totalReceivedQuantity)}</p></div>
+                  <div><p className="text-muted">Недостача</p><p>{qty(row.totalShortage)}</p></div>
+                  <div><p className="text-muted">Себестоимость</p><p>{money(row.totalLandedCostKgs, 'KGS')}</p></div>
+                </div>
+              </Card>
+            ))
+          )}
+        </div>
+      ) : null}
+
+      {tab === 'movements' ? (
+        <div className="space-y-3">
+          {movementRows.length === 0 ? (
+            <Card><p className="text-sm text-muted">Нет движений за выбранный период</p></Card>
+          ) : (
+            movementRows.map((row) => (
+              <Card key={`${row.referenceId}-${row.productCode}-${row.transactionDate}`}>
+                <div className="flex flex-wrap justify-between gap-2">
+                  <div>
+                    <p className="font-semibold">{row.productName}</p>
+                    <p className="text-sm text-muted">{row.typeLabel}</p>
+                  </div>
+                  <p className="text-sm">{formatBusinessDate(row.transactionDate)}</p>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                  <div><p className="text-muted">Кол-во</p><p>+{qty(row.quantity)}</p></div>
+                  <div><p className="text-muted">Себестоимость</p><p>{money(row.unitCost, 'KGS')}</p></div>
+                  <div><p className="text-muted">Сумма</p><p>{money(row.totalCost, 'KGS')}</p></div>
+                  <div><p className="text-muted">Остаток</p><p>{qty(row.balanceAfter)}</p></div>
+                </div>
+              </Card>
+            ))
+          )}
+        </div>
+      ) : null}
+
+      {tab === 'sales' ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Card>
+              <p className="text-sm text-muted">Сумма продаж за период</p>
+              <p className="mt-1 text-3xl font-bold">
+                {salesReport ? money(salesReport.totals.totalAmountKgs, 'KGS') : '—'}
+              </p>
+            </Card>
+            <Card>
+              <p className="text-sm text-muted">Количество продано</p>
+              <p className="mt-1 text-3xl font-bold">
+                {salesReport ? `${qty(salesReport.totals.totalQuantity)} шт.` : '—'}
+              </p>
+            </Card>
+            <Card>
+              <p className="text-sm text-muted">Продаж</p>
+              <p className="mt-1 text-3xl font-bold">
+                {salesReport ? qty(salesReport.totals.saleCount) : '—'}
+              </p>
+            </Card>
+          </div>
+
+          {salesReport && salesReport.range ? (
+            <p className="text-sm text-muted">
+              Период: {formatBusinessDate(salesReport.range.from)} — {formatBusinessDate(salesReport.range.to)}
+            </p>
+          ) : null}
+
+          {!salesReport || salesReport.months.length === 0 ? (
+            <Card><p className="text-sm text-muted">Нет продаж за выбранный период</p></Card>
+          ) : (
+            salesReport.months.map((month) => (
+              <Card key={month.monthKey}>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-lg font-semibold capitalize">{month.monthLabel}</p>
+                    <p className="text-sm text-muted">{month.saleCount} продаж</p>
+                  </div>
+                  <div className="text-right text-sm">
+                    <p className="font-semibold">{money(month.totalAmountKgs, 'KGS')}</p>
+                    <p className="text-muted">{qty(month.totalQuantity)} шт.</p>
+                  </div>
+                </div>
+
+                {month.products.length > 0 ? (
+                  <div className="mt-4 space-y-2">
+                    <p className="text-sm font-semibold">По товарам</p>
+                    {month.products.map((product) => (
+                      <div
+                        key={product.productId}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line px-3 py-2 text-sm"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-medium">{product.productName}</p>
+                          <p className="text-muted">{product.productCode}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-4 text-right">
+                          <div>
+                            <p className="text-muted">Кол-во</p>
+                            <p>{qty(product.quantity)} {product.unit}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted">Сумма</p>
+                            <p>{money(product.totalAmountKgs, 'KGS')}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </Card>
+            ))
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
