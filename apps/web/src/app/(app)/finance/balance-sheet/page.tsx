@@ -18,6 +18,7 @@ interface BalanceSheetReport {
   liabilities: {
     supplierApKgs: string;
     cargoApKgs: string;
+    transportApKgs?: string;
     totalLiabilitiesKgs: string;
   };
   equity: {
@@ -67,6 +68,7 @@ export default function BalanceSheetPage() {
           <p className="font-semibold">ОБЯЗАТЕЛЬСТВА</p>
           <Row k="Долг поставщикам" v={data?.liabilities.supplierApKgs} />
           <Row k="Долг за карго" v={data?.liabilities.cargoApKgs} />
+          <Row k="Долг за транспорт" v={data?.liabilities.transportApKgs} />
           <Row k="Итого обязательства" v={data?.liabilities.totalLiabilitiesKgs} strong />
         </Card>
         <Card className="space-y-2">

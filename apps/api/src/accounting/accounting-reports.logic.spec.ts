@@ -21,6 +21,10 @@ import {
   validateJournalLines,
 } from './accounting-journal.logic';
 import {
+  buildLogisticsApPaymentLines,
+  buildLogisticsCostLines,
+} from './logistics-cost.logic';
+import {
   buildBalanceSheet,
   buildCashFlowStatement,
   buildFinanceDashboard,
@@ -374,3 +378,107 @@ describe('opening investor capital business date 2026-05-01', () => {
     expect(sheet.differenceKgs).toBe('0.00');
   });
 });
+
+describe('purchase logistics landed-cost scenario', () => {
+  const DAY = new Date('2026-06-01T00:00:00.000Z');
+  const PAY_DAY = new Date('2026-06-10T00:00:00.000Z');
+
+  function scenarioJournals() {
+    const opening = journal(DAY1, buildOpeningInvestorCapitalLines(), 'OPENING_BALANCE');
+    const goods = journal(
+      DAY,
+      buildPartialPurchaseLines({ inventoryKgs: '1000000', paidKgs: '700000' }),
+      'PURCHASE_RECEIPT',
+    );
+    const china = journal(
+      DAY,
+      buildLogisticsCostLines({
+        amountKgs: '50000',
+        paidKgs: '50000',
+        payableAccountCode: ACCOUNT_CODE.TRANSPORT_AP,
+      }),
+      'LOGISTICS_CHINA',
+    );
+    const cargo = journal(
+      DAY,
+      buildLogisticsCostLines({
+        amountKgs: '100000',
+        paidKgs: '60000',
+        payableAccountCode: ACCOUNT_CODE.CARGO_AP,
+      }),
+      'CARGO',
+    );
+    const kg = journal(
+      DAY,
+      buildLogisticsCostLines({
+        amountKgs: '30000',
+        payableAccountCode: ACCOUNT_CODE.TRANSPORT_AP,
+      }),
+      'LOGISTICS_KYRGYZSTAN',
+    );
+    return { opening, goods, china, cargo, kg, journals: [opening, goods, china, cargo, kg] };
+  }
+
+  it('caps inventory at 1,180,000 without double counting or ОПУ expense', () => {
+    const { journals } = scenarioJournals();
+    const posted = journals.flatMap((row) => row.lines);
+    expect(debitNormalBalance(posted, ACCOUNT_CODE.INVENTORY).toFixed(2)).toBe('1180000.00');
+    expect(debitNormalBalance(posted, ACCOUNT_CODE.CASH).toFixed(2)).toBe('1774712.00');
+    expect(creditNormalBalance(posted, ACCOUNT_CODE.SUPPLIER_AP).toFixed(2)).toBe('300000.00');
+    expect(creditNormalBalance(posted, ACCOUNT_CODE.CARGO_AP).toFixed(2)).toBe('40000.00');
+    expect(creditNormalBalance(posted, ACCOUNT_CODE.TRANSPORT_AP).toFixed(2)).toBe('30000.00');
+    const pl = buildProfitAndLoss(posted);
+    expect(pl.operatingExpensesKgs).toBe('0.00');
+    expect(pl.cogsKgs).toBe('0.00');
+    const sheet = buildBalanceSheet(posted);
+    expect(sheet.assets.inventoryKgs).toBe('1180000.00');
+    expect(sheet.liabilities.supplierApKgs).toBe('300000.00');
+    expect(sheet.liabilities.cargoApKgs).toBe('40000.00');
+    expect(sheet.liabilities.transportApKgs).toBe('30000.00');
+    expect(sheet.liabilities.totalLiabilitiesKgs).toBe('370000.00');
+    expect(sheet.differenceKgs).toBe('0.00');
+  });
+
+  it('ДДС uses actual payment dates and logistics cash-out categories', () => {
+    const { journals } = scenarioJournals();
+    const laterPay = journal(
+      PAY_DAY,
+      buildLogisticsApPaymentLines({
+        amountKgs: '40000',
+        payableAccountCode: ACCOUNT_CODE.CARGO_AP,
+      }),
+      'CARGO_PAYMENT',
+    );
+    const ddsBefore = buildCashFlowStatement({
+      journals,
+      from: DAY,
+      to: new Date('2026-06-05T23:59:59.999Z'),
+    });
+    expect(ddsBefore.chinaTransportPaymentsKgs).toBe('50000.00');
+    expect(ddsBefore.cargoPaymentsKgs).toBe('60000.00');
+    expect(ddsBefore.kyrgyzstanTransportPaymentsKgs).toBe('0.00');
+    expect(ddsBefore.supplierPaymentsKgs).toBe('700000.00');
+
+    const ddsPay = classifyJournalCashFlow(laterPay);
+    expect(ddsPay.cargoPaymentsKgs).toBe('40000.00');
+    const afterPay = [...journals.flatMap((row) => row.lines), ...laterPay.lines];
+    expect(debitNormalBalance(afterPay, ACCOUNT_CODE.INVENTORY).toFixed(2)).toBe('1180000.00');
+    expect(creditNormalBalance(afterPay, ACCOUNT_CODE.CARGO_AP).toFixed(2)).toBe('0.00');
+  });
+
+  it('reversal of unpaid logistics nets inventory and AP to zero', () => {
+    const recognize = journal(
+      DAY,
+      buildLogisticsCostLines({
+        amountKgs: '30000',
+        payableAccountCode: ACCOUNT_CODE.TRANSPORT_AP,
+      }),
+      'LOGISTICS_KYRGYZSTAN',
+    );
+    const reversal = journal(PAY_DAY, reverseJournalLines(recognize.lines), 'REVERSAL');
+    const posted = [...recognize.lines, ...reversal.lines];
+    expect(debitNormalBalance(posted, ACCOUNT_CODE.INVENTORY).toFixed(2)).toBe('0.00');
+    expect(creditNormalBalance(posted, ACCOUNT_CODE.TRANSPORT_AP).toFixed(2)).toBe('0.00');
+  });
+});
+

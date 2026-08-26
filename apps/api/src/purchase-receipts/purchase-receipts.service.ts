@@ -26,10 +26,11 @@ import {
 } from '../common/date.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountingService } from '../accounting/accounting.service';
-import { ACCOUNT_CODE, UNSPECIFIED_CARGO_VENDOR_NAME } from '../accounting/accounting-codes';
+import { LogisticsService } from '../accounting/logistics.service';
+import { ACCOUNT_CODE } from '../accounting/accounting-codes';
 import { remainingPayableAmount } from '../accounting/accounting-journal.logic';
 import { rebuildInventorySkippingCancelledDocuments } from '../inventory/rebuild-inventory-from-ledger';
-import { dec, roundMoney } from '../purchases/purchase-calc';
+import { dec, roundMoney, roundWeight } from '../purchases/purchase-calc';
 import {
   calculateReceipt,
   computeInventoryAfterReceipt,
@@ -53,6 +54,7 @@ export class PurchaseReceiptsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accounting: AccountingService,
+    private readonly logistics: LogisticsService,
   ) {}
 
   private include() {
@@ -648,6 +650,15 @@ export class PurchaseReceiptsService {
       },
     });
 
+    for (const item of receipt.items) {
+      if (
+        roundWeight(item.unitWeightKg).lte(0) ||
+        roundWeight(item.product.unitWeightKg).lte(0)
+      ) {
+        throw new BadRequestException('Не указан вес товара');
+      }
+    }
+
     if (calc.totals.totalReceivedQuantity.lte(0)) {
       throw new BadRequestException(
         'Укажите фактическое количество хотя бы для одного товара',
@@ -783,17 +794,15 @@ export class PurchaseReceiptsService {
         data: { status: purchaseStatus },
       });
 
-      const cargoVendor = await tx.cargoVendor.findFirst({
-        where: { name: UNSPECIFIED_CARGO_VENDOR_NAME, isActive: true },
-      });
-      const paidSupplier = roundMoney(dto.supplierPaidKgs ?? 0);
-      const supplierPortion = remainingPayableAmount(
-        calc.totals.totalLandedCostKgs,
-        calc.totals.cargoKgs,
+      const goodsKgs = calc.items.reduce(
+        (sum, item) => sum.plus(item.purchaseCostKgs),
+        dec(0),
       );
+      const paidSupplier = roundMoney(dto.supplierPaidKgs ?? 0);
+      const supplierPortion = remainingPayableAmount(goodsKgs, 0);
       if (paidSupplier.gt(supplierPortion)) {
         throw new BadRequestException(
-          'Оплата поставщику не может превышать стоимость товара без карго',
+          'Оплата поставщику не может превышать стоимость товара',
         );
       }
       let cashAccountCode: string = ACCOUNT_CODE.CASH;
@@ -809,15 +818,16 @@ export class PurchaseReceiptsService {
         );
         cashAccountCode = this.accounting.cashAccountCodeForCompanyAccount(account);
       }
+      await this.logistics.assertPurchaseWeights(tx, receipt.purchaseId);
+      await this.logistics.autoPostUnposted(tx, user.id, receipt.purchaseId);
       await this.accounting.postPurchaseReceipt(tx, {
         receiptId: id,
         purchaseId: receipt.purchaseId,
         supplierId: receipt.supplierId,
-        inventoryKgs: calc.totals.totalLandedCostKgs,
-        cargoKgs: calc.totals.cargoKgs,
+        inventoryKgs: goodsKgs,
+        cargoKgs: '0.00',
         createdByUserId: user.id,
         postedAt: receipt.warehouseReceiptDate,
-        cargoVendorId: cargoVendor?.id ?? null,
         paidSupplierKgs: paidSupplier,
         cashAccountCode,
       });

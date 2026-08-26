@@ -81,6 +81,52 @@ export async function submitSupplierPayment(
   });
 }
 
+export type PayableKind = 'SUPPLIER' | 'CARGO' | 'TRANSPORT';
+export type PayablePayPath = 'SUPPLIER' | 'LOGISTICS' | 'CARGO_PAYABLE' | 'TRANSPORT_PAYABLE';
+
+export interface PayablePaymentTarget extends SupplierPayablePaymentTarget {
+  kind: PayableKind;
+  payableId?: string;
+  expenseId?: string | null;
+  payPath?: PayablePayPath;
+}
+
+export async function submitPayablePayment(
+  target: PayablePaymentTarget,
+  values: SupplierPaymentFormValues,
+) {
+  const body = JSON.stringify({
+    amountKgs: values.amountKgs.trim(),
+    paymentAccountId: values.paymentAccountId,
+    paidAt: values.paidAt,
+    note: values.note.trim() || undefined,
+  });
+  const path = target.payPath ?? (target.kind === 'SUPPLIER' ? 'SUPPLIER' : 'LOGISTICS');
+  if (path === 'SUPPLIER') {
+    return submitSupplierPayment(target.purchaseId, values);
+  }
+  if (path === 'CARGO_PAYABLE' && target.payableId) {
+    return api(`/accounting/cargo-payables/${target.payableId}/payments`, {
+      method: 'POST',
+      body,
+    });
+  }
+  if (path === 'TRANSPORT_PAYABLE' && target.payableId) {
+    return api(`/accounting/transport-payables/${target.payableId}/payments`, {
+      method: 'POST',
+      body,
+    });
+  }
+  const expenseId = target.expenseId;
+  if (!expenseId) {
+    throw new Error('Не указан расход логистики для оплаты');
+  }
+  return api(`/accounting/logistics/${expenseId}/payments`, {
+    method: 'POST',
+    body,
+  });
+}
+
 export function supplierPaymentTargetFromPayable(row: {
   purchaseId?: string;
   supplierName: string;

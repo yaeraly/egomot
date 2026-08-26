@@ -431,7 +431,9 @@ export function PurchaseWizard({ purchase }: { purchase?: Purchase }) {
                     )
                   }
                 >
-                  {(Object.keys(LOGISTICS_LABELS) as LogisticsType[]).map((type) => (
+                  {(Object.keys(LOGISTICS_LABELS) as LogisticsType[])
+                    .filter((type) => type !== 'OTHER')
+                    .map((type) => (
                     <option key={type} value={type}>
                       {LOGISTICS_LABELS[type]}
                     </option>

@@ -21,10 +21,13 @@ import {
   buildOperatingExpenseLines,
   buildOwnerWithdrawalLines,
   buildSupplierApPaymentLines,
+  buildTransportPaymentLines,
   payableStatusFromAmounts,
   remainingPayableAmount,
 } from './accounting-journal.logic';
 import { AccountingService } from './accounting.service';
+import { PayableSyncService } from './payable-sync.service';
+import { DEFAULT_PAYABLE_LIST_FILTER, filterPayables } from './payable-sync.logic';
 import {
   CreateCargoPaymentDto,
   CreateCargoVendorDto,
@@ -38,22 +41,26 @@ export class AccountingDocumentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accounting: AccountingService,
+    private readonly payableSync: PayableSyncService,
   ) {}
 
-  async listSupplierPayables() {
+  async listSupplierPayables(filter = DEFAULT_PAYABLE_LIST_FILTER) {
+    await this.payableSync.syncFromLedger();
+    const gl = await this.payableSync.glBalances();
     const rows = await this.prisma.supplierPayable.findMany({
       include: {
         supplier: true,
-        purchase: { select: { id: true, number: true, payableStatus: true } },
+        purchase: { select: { id: true, number: true, purchaseDate: true, payableStatus: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
-    return rows.map((row) => ({
+    const mapped = rows.map((row) => ({
       id: row.id,
       supplierId: row.supplierId,
       supplierName: row.supplier.name,
       purchaseId: row.purchaseId,
       purchaseNumber: row.purchase.number,
+      purchaseDate: row.purchase.purchaseDate,
       invoiceRef: row.invoiceRef,
       amountKgs: publicDecimal(row.amountKgs),
       paidAmountKgs: publicDecimal(row.paidAmountKgs),
@@ -61,9 +68,25 @@ export class AccountingDocumentsService {
       dueDate: row.dueDate,
       status: row.status,
     }));
+    const visible = filterPayables(mapped, filter);
+    const remainingKgs = moneyStr(
+      mapped.reduce(
+        (sum, row) =>
+          Number(row.remainingAmountKgs) > 0 ? sum.plus(dec(row.remainingAmountKgs)) : sum,
+        dec(0),
+      ),
+    );
+    return {
+      glRemainingKgs: gl.supplierApKgs,
+      remainingKgs,
+      differenceKgs: moneyStr(dec(remainingKgs).minus(dec(gl.supplierApKgs))),
+      filter,
+      rows: visible,
+    };
   }
 
   async listCargoPayables() {
+    await this.payableSync.syncFromLedger();
     const rows = await this.prisma.cargoPayable.findMany({
       include: {
         cargoVendor: true,
@@ -105,9 +128,10 @@ export class AccountingDocumentsService {
   }
 
   async recordPurchasePayment(userId: string, purchaseId: string, dto: CreatePurchasePaymentDto) {
+    await this.payableSync.syncFromLedger();
     const amount = roundMoney(dto.amountKgs);
     if (!amount.gt(0)) {
-      throw new BadRequestException('Payment amount must be greater than zero');
+      throw new BadRequestException('Сумма оплаты должна быть больше 0');
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -120,11 +144,11 @@ export class AccountingDocumentsService {
       const payable = purchase.supplierPayables[0];
       if (!payable) {
         throw new BadRequestException(
-          'No supplier payable exists for this purchase. Historical purchases are not backfilled.',
+          'Нет долга поставщику по этой закупке. Обновите страницу «Долги».',
         );
       }
       if (amount.gt(dec(payable.remainingAmountKgs))) {
-        throw new BadRequestException('Payment exceeds remaining supplier payable');
+        throw new BadRequestException('Сумма оплаты не может превышать остаток долга');
       }
 
       const account = await this.accounting.requireCompanyPaymentAccount(
@@ -215,18 +239,19 @@ export class AccountingDocumentsService {
   }
 
   async recordCargoPayment(userId: string, cargoPayableId: string, dto: CreateCargoPaymentDto) {
+    await this.payableSync.syncFromLedger();
     const amount = roundMoney(dto.amountKgs);
     if (!amount.gt(0)) {
-      throw new BadRequestException('Payment amount must be greater than zero');
+      throw new BadRequestException('Сумма оплаты должна быть больше 0');
     }
 
     return this.prisma.$transaction(async (tx) => {
       const payable = await tx.cargoPayable.findUnique({
         where: { id: cargoPayableId },
       });
-      if (!payable) throw new NotFoundException('Cargo payable not found');
+      if (!payable) throw new NotFoundException('Долг за карго не найден');
       if (amount.gt(dec(payable.remainingAmountKgs))) {
-        throw new BadRequestException('Payment exceeds remaining cargo payable');
+        throw new BadRequestException('Сумма оплаты не может превышать остаток долга');
       }
 
       const account = await this.accounting.requireCompanyPaymentAccount(
@@ -282,6 +307,69 @@ export class AccountingDocumentsService {
         where: { id: payment.id },
         include: { journal: { include: { lines: { include: { account: true } } } } },
       });
+    });
+  }
+
+  async recordTransportPayment(
+    userId: string,
+    transportPayableId: string,
+    dto: CreateCargoPaymentDto,
+  ) {
+    await this.payableSync.syncFromLedger();
+    const amount = roundMoney(dto.amountKgs);
+    if (!amount.gt(0)) {
+      throw new BadRequestException('Сумма оплаты должна быть больше 0');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const payable = await tx.transportPayable.findUnique({
+        where: { id: transportPayableId },
+      });
+      if (!payable) throw new NotFoundException('Долг за транспорт не найден');
+      if (amount.gt(dec(payable.remainingAmountKgs))) {
+        throw new BadRequestException('Сумма оплаты не может превышать остаток долга');
+      }
+
+      const account = await this.accounting.requireCompanyPaymentAccount(
+        dto.paymentAccountId,
+        tx,
+      );
+      const cashAccountCode = this.accounting.cashAccountCodeForCompanyAccount(account);
+      const paidAt = dto.paidAt ? new Date(dto.paidAt) : new Date();
+      const paymentId = randomUUID();
+      const sourceType =
+        payable.type === 'CHINA_INTERNAL_TRANSPORT'
+          ? AccountingSourceType.LOGISTICS_CHINA_PAYMENT
+          : AccountingSourceType.LOGISTICS_KYRGYZSTAN_PAYMENT;
+
+      await this.accounting.postJournal(
+        {
+          sourceType,
+          sourceId: paymentId,
+          memo: dto.note?.trim() || `Transport payment ${payable.type}`,
+          lines: buildTransportPaymentLines({ amountKgs: amount, cashAccountCode }).map((line) =>
+            line.accountCode === cashAccountCode
+              ? { ...line, paymentAccountId: account.id }
+              : line,
+          ),
+          createdByUserId: userId,
+          postedAt: paidAt,
+        },
+        tx,
+      );
+
+      const newPaid = roundMoney(dec(payable.paidAmountKgs).plus(amount));
+      const remaining = remainingPayableAmount(payable.amountKgs, newPaid);
+      const updated = await tx.transportPayable.update({
+        where: { id: transportPayableId },
+        data: {
+          paidAmountKgs: moneyStr(newPaid),
+          remainingAmountKgs: moneyStr(remaining),
+          status: payableStatusFromAmounts(payable.amountKgs, newPaid) as PayableStatus,
+        },
+      });
+      await this.accounting.syncPurchaseSettlement(tx, payable.purchaseId);
+      return updated;
     });
   }
 

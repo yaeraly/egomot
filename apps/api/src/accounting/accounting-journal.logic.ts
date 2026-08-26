@@ -241,6 +241,18 @@ export function buildCargoPaymentLines(params: {
   ];
 }
 
+export function buildTransportPaymentLines(params: {
+  amountKgs: Decimal.Value;
+  cashAccountCode?: AccountCode;
+}): JournalLineDraft[] {
+  const amount = requirePositive(params.amountKgs, 'Transport payment');
+  const cashCode = params.cashAccountCode ?? ACCOUNT_CODE.CASH;
+  return [
+    line(ACCOUNT_CODE.TRANSPORT_AP, amount, 0, 'Transport payment'),
+    line(cashCode, 0, amount, 'Transport payment'),
+  ];
+}
+
 export function buildSaleLines(params: {
   revenueKgs: Decimal.Value;
   paidKgs?: Decimal.Value;

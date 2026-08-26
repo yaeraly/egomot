@@ -8,6 +8,7 @@ import { RolesGuard } from '../common/roles.guard';
 import { AccountingDocumentsService } from './accounting-documents.service';
 import { AccountingReportsService } from './accounting-reports.service';
 import { AccountingService } from './accounting.service';
+import { LogisticsService } from './logistics.service';
 import {
   CreateCargoPaymentDto,
   CreateCargoVendorDto,
@@ -24,6 +25,7 @@ export class AccountingController {
     private readonly accounting: AccountingService,
     private readonly documents: AccountingDocumentsService,
     private readonly reports: AccountingReportsService,
+    private readonly logistics: LogisticsService,
   ) {}
 
   @Get('accounts')
@@ -53,13 +55,34 @@ export class AccountingController {
   }
 
   @Get('supplier-payables')
-  listSupplierPayables() {
-    return this.documents.listSupplierPayables();
+  listSupplierPayables(@Query('filter') filter?: string) {
+    return this.documents.listSupplierPayables(
+      filter === 'ALL' ||
+        filter === 'OPEN' ||
+        filter === 'UNPAID' ||
+        filter === 'PARTIAL' ||
+        filter === 'PAID'
+        ? filter
+        : undefined,
+    );
   }
 
   @Get('cargo-payables')
   listCargoPayables() {
     return this.documents.listCargoPayables();
+  }
+
+  @Get('logistics-debts')
+  listLogisticsDebts(@Query('filter') filter?: string) {
+    return this.logistics.listDebts(
+      filter === 'ALL' ||
+        filter === 'OPEN' ||
+        filter === 'UNPAID' ||
+        filter === 'PARTIAL' ||
+        filter === 'PAID'
+        ? filter
+        : undefined,
+    );
   }
 
   @Get('receivables')
@@ -98,6 +121,29 @@ export class AccountingController {
     @Body() dto: CreateCargoPaymentDto,
   ) {
     return this.documents.recordCargoPayment(user.id, id, dto);
+  }
+
+  @Post('transport-payables/:id/payments')
+  payTransport(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Body() dto: CreateCargoPaymentDto,
+  ) {
+    return this.documents.recordTransportPayment(user.id, id, dto);
+  }
+
+  @Post('logistics/:expenseId/payments')
+  payLogisticsDebt(
+    @CurrentUser() user: User,
+    @Param('expenseId') expenseId: string,
+    @Body() dto: CreateCargoPaymentDto,
+  ) {
+    return this.logistics.payByExpenseId(user.id, expenseId, {
+      amountKgs: dto.amountKgs,
+      paymentAccountId: dto.paymentAccountId,
+      paidAt: dto.paidAt ?? null,
+      note: dto.note ?? null,
+    });
   }
 
   @Post('cargo-payments/:id/cancel')

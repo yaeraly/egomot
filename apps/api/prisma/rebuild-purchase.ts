@@ -450,10 +450,13 @@ async function recreatePurchase(snapshot: PurchaseRebuildSnapshot) {
         logistics: {
           create: snapshot.purchase.logistics.map((row) => ({
             type: row.type as never,
+            expenseDate: snapshot.purchase.purchaseDate ?? new Date(),
             amount: row.amount,
             currency: row.currency as never,
             exchangeRate: row.exchangeRate,
             amountKgs: row.amountKgs,
+            paidAmountKgs: '0.00',
+            remainingAmountKgs: row.amountKgs,
             comment: row.comment,
           })),
         },

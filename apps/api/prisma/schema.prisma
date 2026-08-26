@@ -148,6 +148,10 @@ enum AccountingSourceType {
   SALE_COGS
   PURCHASE
   CARGO
+  LOGISTICS_CHINA
+  LOGISTICS_KYRGYZSTAN
+  LOGISTICS_CHINA_PAYMENT
+  LOGISTICS_KYRGYZSTAN_PAYMENT
 }
 
 model User {
@@ -175,6 +179,8 @@ model User {
   ownerWithdrawals            OwnerWithdrawal[]
   purchasePayments            PurchasePayment[]
   cargoPayments               CargoPayment[]
+  logisticsPayments           LogisticsPayment[]
+  logisticsExpensesCreated    PurchaseLogisticsExpense[] @relation("LogisticsExpenseCreatedBy")
 
   @@index([role])
 }
@@ -280,6 +286,7 @@ model Purchase {
   priceHistory                  ProductPurchasePriceHistory[]
   supplierPayables              SupplierPayable[]
   cargoPayables                 CargoPayable[]
+  transportPayables             TransportPayable[]
   purchasePayments              PurchasePayment[]
 
   @@index([status])
@@ -455,20 +462,39 @@ model PurchaseReceiptDiscrepancy {
 }
 
 model PurchaseLogisticsExpense {
-  id           String        @id @default(uuid())
-  purchaseId   String
-  purchase     Purchase      @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
-  type         LogisticsType
-  amount       Decimal       @db.Decimal(14, 2)
-  currency     Currency
-  exchangeRate Decimal?      @db.Decimal(14, 6)
-  amountKgs    Decimal       @db.Decimal(14, 2)
-  comment      String?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id                 String         @id @default(uuid())
+  purchaseId         String
+  purchase           Purchase       @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  type               LogisticsType
+  expenseDate        DateTime       @db.Date
+  payeeName          String?
+  amount             Decimal        @db.Decimal(18, 6)
+  currency           Currency
+  exchangeRate       Decimal?       @db.Decimal(14, 6)
+  amountKgs          Decimal        @db.Decimal(14, 2)
+  paidAmountKgs      Decimal        @default(0) @db.Decimal(14, 2)
+  remainingAmountKgs Decimal        @db.Decimal(14, 2)
+  status             PayableStatus  @default(UNPAID)
+  paymentAccountId   String?
+  paymentAccount     PaymentAccount? @relation(fields: [paymentAccountId], references: [id])
+  paidAt             DateTime?
+  comment            String?
+  journalId          String?        @unique
+  journal            Journal?       @relation(fields: [journalId], references: [id])
+  cargoPayableId     String?        @unique
+  cargoPayable       CargoPayable?  @relation(fields: [cargoPayableId], references: [id])
+  transportPayableId String?        @unique
+  transportPayable   TransportPayable? @relation(fields: [transportPayableId], references: [id])
+  createdByUserId    String?
+  createdBy          User?          @relation("LogisticsExpenseCreatedBy", fields: [createdByUserId], references: [id])
+  payments           LogisticsPayment[]
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
 
   @@index([purchaseId])
   @@index([type])
+  @@index([status])
+  @@index([expenseDate])
 }
 
 model AuditLog {
@@ -639,6 +665,8 @@ model PaymentAccount {
   ownerWithdrawals  OwnerWithdrawal[]
   purchasePayments  PurchasePayment[]
   cargoPayments     CargoPayment[]
+  logisticsExpenses PurchaseLogisticsExpense[]
+  logisticsPayments LogisticsPayment[]
 
   @@unique([userId, paymentMethodId])
   @@index([userId])
@@ -823,6 +851,9 @@ model Journal {
   cargoPayment         CargoPayment?
   supplierPayable      SupplierPayable?
   cargoPayable         CargoPayable?
+  transportPayable     TransportPayable?
+  logisticsExpense     PurchaseLogisticsExpense?
+  logisticsPayments    LogisticsPayment[]
 
   @@index([status])
   @@index([sourceType, sourceId])
@@ -901,6 +932,7 @@ model CargoPayable {
   journalId          String?       @unique
   journal            Journal?      @relation(fields: [journalId], references: [id])
   payments           CargoPayment[]
+  logisticsExpense   PurchaseLogisticsExpense?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
@@ -946,6 +978,50 @@ model CargoPayment {
 
   @@index([cargoPayableId])
   @@index([paidAt])
+}
+
+model TransportPayable {
+  id                 String         @id @default(uuid())
+  purchaseId         String
+  purchase           Purchase       @relation(fields: [purchaseId], references: [id])
+  type               LogisticsType
+  payeeName          String?
+  amountKgs          Decimal        @db.Decimal(14, 2)
+  currency           Currency       @default(KGS)
+  originalAmount     Decimal        @db.Decimal(18, 6)
+  paidAmountKgs      Decimal        @default(0) @db.Decimal(14, 2)
+  remainingAmountKgs Decimal        @db.Decimal(14, 2)
+  status             PayableStatus  @default(UNPAID)
+  journalId          String?        @unique
+  journal            Journal?       @relation(fields: [journalId], references: [id])
+  logisticsExpense   PurchaseLogisticsExpense?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@index([purchaseId])
+  @@index([type])
+  @@index([status])
+}
+
+model LogisticsPayment {
+  id                 String                   @id @default(uuid())
+  logisticsExpenseId String
+  logisticsExpense   PurchaseLogisticsExpense @relation(fields: [logisticsExpenseId], references: [id], onDelete: Cascade)
+  amountKgs          Decimal                  @db.Decimal(14, 2)
+  paidAt             DateTime
+  paymentAccountId   String
+  paymentAccount     PaymentAccount           @relation(fields: [paymentAccountId], references: [id])
+  journalId          String                   @unique
+  journal            Journal                  @relation(fields: [journalId], references: [id])
+  createdByUserId    String
+  createdBy          User                     @relation(fields: [createdByUserId], references: [id])
+  note               String?
+  isRecognition      Boolean                  @default(false)
+  createdAt          DateTime                 @default(now())
+
+  @@index([logisticsExpenseId])
+  @@index([paidAt])
+  @@index([paymentAccountId])
 }
 
 model OperatingExpense {

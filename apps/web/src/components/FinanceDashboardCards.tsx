@@ -15,6 +15,7 @@ export const FINANCE_DASHBOARD_CARDS: Array<{
   { key: 'accountsReceivableKgs', label: 'Дебиторская задолженность', testId: 'accounts-receivable' },
   { key: 'supplierDebtKgs', label: 'Долг поставщикам', testId: 'supplier-ap' },
   { key: 'cargoDebtKgs', label: 'Долг за карго', testId: 'cargo-ap' },
+  { key: 'transportDebtKgs', label: 'Долг за транспорт', testId: 'transport-ap' },
   { key: 'investorCapitalKgs', label: 'Капитал инвестора', testId: 'investor-capital' },
   { key: 'salesRevenueKgs', label: 'Выручка', testId: 'revenue' },
   { key: 'cogsKgs', label: 'Себестоимость', testId: 'cogs' },

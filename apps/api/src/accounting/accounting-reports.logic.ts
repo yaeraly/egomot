@@ -4,6 +4,11 @@ import {
   creditNormalBalance,
   debitNormalBalance,
 } from './accounting-journal.logic';
+import {
+  isCargoLogisticsCashFlowSource,
+  isChinaLogisticsCashFlowSource,
+  isKyrgyzstanLogisticsCashFlowSource,
+} from './logistics-cost.logic';
 
 export type PostedReportLine = {
   accountCode: string;
@@ -30,7 +35,9 @@ export type CashFlowBuckets = {
   customerCollectionsKgs: string;
   otherCashInKgs: string;
   supplierPaymentsKgs: string;
+  chinaTransportPaymentsKgs: string;
   cargoPaymentsKgs: string;
+  kyrgyzstanTransportPaymentsKgs: string;
   warehouseRentKgs: string;
   stationeryKgs: string;
   ownerSalaryKgs: string;
@@ -44,7 +51,9 @@ const EMPTY_CASH_FLOW: CashFlowBuckets = {
   customerCollectionsKgs: '0.00',
   otherCashInKgs: '0.00',
   supplierPaymentsKgs: '0.00',
+  chinaTransportPaymentsKgs: '0.00',
   cargoPaymentsKgs: '0.00',
+  kyrgyzstanTransportPaymentsKgs: '0.00',
   warehouseRentKgs: '0.00',
   stationeryKgs: '0.00',
   ownerSalaryKgs: '0.00',
@@ -123,6 +132,7 @@ function classifyCashCounterpart(accountCode: string, cashIsInflow: boolean): ke
     return 'supplierPaymentsKgs';
   }
   if (accountCode === ACCOUNT_CODE.CARGO_AP) return 'cargoPaymentsKgs';
+  if (accountCode === ACCOUNT_CODE.TRANSPORT_AP) return 'kyrgyzstanTransportPaymentsKgs';
   if (accountCode === ACCOUNT_CODE.WAREHOUSE_RENT) return 'warehouseRentKgs';
   if (accountCode === ACCOUNT_CODE.STATIONERY) return 'stationeryKgs';
   if (accountCode === ACCOUNT_CODE.OWNER_SALARY) return 'ownerSalaryKgs';
@@ -130,8 +140,7 @@ function classifyCashCounterpart(accountCode: string, cashIsInflow: boolean): ke
   return 'otherCashOutKgs';
 }
 
-export function classifyJournalCashFlow(journal: PostedReportJournal): CashFlowBuckets {
-  const buckets: Record<string, Decimal> = {};
+function journalCashTotals(journal: PostedReportJournal) {
   const cashDebit = roundMoney(
     journal.lines
       .filter((row) => CASH_CODE_SET.has(row.accountCode))
@@ -142,6 +151,61 @@ export function classifyJournalCashFlow(journal: PostedReportJournal): CashFlowB
       .filter((row) => CASH_CODE_SET.has(row.accountCode))
       .reduce((sum, row) => sum.plus(roundMoney(row.creditKgs)), roundMoney(0)),
   );
+  return { cashDebit, cashCredit };
+}
+
+function logisticsCashOutBucket(
+  sourceType?: string,
+): keyof CashFlowBuckets | null {
+  if (isChinaLogisticsCashFlowSource(sourceType)) return 'chinaTransportPaymentsKgs';
+  if (isCargoLogisticsCashFlowSource(sourceType)) return 'cargoPaymentsKgs';
+  if (isKyrgyzstanLogisticsCashFlowSource(sourceType)) {
+    return 'kyrgyzstanTransportPaymentsKgs';
+  }
+  return null;
+}
+
+function classifyBySourceCashMovement(
+  journal: PostedReportJournal,
+  outflowKey: keyof CashFlowBuckets,
+): CashFlowBuckets {
+  const { cashDebit, cashCredit } = journalCashTotals(journal);
+  const buckets = { ...EMPTY_CASH_FLOW };
+  if (cashCredit.gt(0)) {
+    buckets[outflowKey] = moneyStr(cashCredit);
+  }
+  if (cashDebit.gt(0)) {
+    buckets.otherCashInKgs = moneyStr(cashDebit);
+  }
+  return buckets;
+}
+
+function toCashFlowBuckets(buckets: Record<string, Decimal>): CashFlowBuckets {
+  return {
+    investorContributionsKgs: moneyStr(buckets.investorContributionsKgs ?? 0),
+    cashSalesKgs: moneyStr(buckets.cashSalesKgs ?? 0),
+    customerCollectionsKgs: moneyStr(buckets.customerCollectionsKgs ?? 0),
+    otherCashInKgs: moneyStr(buckets.otherCashInKgs ?? 0),
+    supplierPaymentsKgs: moneyStr(buckets.supplierPaymentsKgs ?? 0),
+    chinaTransportPaymentsKgs: moneyStr(buckets.chinaTransportPaymentsKgs ?? 0),
+    cargoPaymentsKgs: moneyStr(buckets.cargoPaymentsKgs ?? 0),
+    kyrgyzstanTransportPaymentsKgs: moneyStr(buckets.kyrgyzstanTransportPaymentsKgs ?? 0),
+    warehouseRentKgs: moneyStr(buckets.warehouseRentKgs ?? 0),
+    stationeryKgs: moneyStr(buckets.stationeryKgs ?? 0),
+    ownerSalaryKgs: moneyStr(buckets.ownerSalaryKgs ?? 0),
+    ownerWithdrawalsKgs: moneyStr(buckets.ownerWithdrawalsKgs ?? 0),
+    otherCashOutKgs: moneyStr(buckets.otherCashOutKgs ?? 0),
+  };
+}
+
+export function classifyJournalCashFlow(journal: PostedReportJournal): CashFlowBuckets {
+  const sourceOutflowKey = logisticsCashOutBucket(journal.sourceType);
+  if (sourceOutflowKey) {
+    return classifyBySourceCashMovement(journal, sourceOutflowKey);
+  }
+
+  const buckets: Record<string, Decimal> = {};
+  const { cashDebit, cashCredit } = journalCashTotals(journal);
 
   const inflowCounterparts = journal.lines
     .filter((row) => !CASH_CODE_SET.has(row.accountCode) && roundMoney(row.creditKgs).gt(0))
@@ -172,19 +236,7 @@ export function classifyJournalCashFlow(journal: PostedReportJournal): CashFlowB
     bump(buckets, 'otherCashOutKgs', remainingOut);
   }
 
-  return {
-    investorContributionsKgs: moneyStr(buckets.investorContributionsKgs ?? 0),
-    cashSalesKgs: moneyStr(buckets.cashSalesKgs ?? 0),
-    customerCollectionsKgs: moneyStr(buckets.customerCollectionsKgs ?? 0),
-    otherCashInKgs: moneyStr(buckets.otherCashInKgs ?? 0),
-    supplierPaymentsKgs: moneyStr(buckets.supplierPaymentsKgs ?? 0),
-    cargoPaymentsKgs: moneyStr(buckets.cargoPaymentsKgs ?? 0),
-    warehouseRentKgs: moneyStr(buckets.warehouseRentKgs ?? 0),
-    stationeryKgs: moneyStr(buckets.stationeryKgs ?? 0),
-    ownerSalaryKgs: moneyStr(buckets.ownerSalaryKgs ?? 0),
-    ownerWithdrawalsKgs: moneyStr(buckets.ownerWithdrawalsKgs ?? 0),
-    otherCashOutKgs: moneyStr(buckets.otherCashOutKgs ?? 0),
-  };
+  return toCashFlowBuckets(buckets);
 }
 
 export function sumCashFlowBuckets(rows: CashFlowBuckets[]): CashFlowBuckets {
@@ -195,7 +247,15 @@ export function sumCashFlowBuckets(rows: CashFlowBuckets[]): CashFlowBuckets {
       customerCollectionsKgs: addMoney(sum.customerCollectionsKgs, row.customerCollectionsKgs),
       otherCashInKgs: addMoney(sum.otherCashInKgs, row.otherCashInKgs),
       supplierPaymentsKgs: addMoney(sum.supplierPaymentsKgs, row.supplierPaymentsKgs),
+      chinaTransportPaymentsKgs: addMoney(
+        sum.chinaTransportPaymentsKgs,
+        row.chinaTransportPaymentsKgs,
+      ),
       cargoPaymentsKgs: addMoney(sum.cargoPaymentsKgs, row.cargoPaymentsKgs),
+      kyrgyzstanTransportPaymentsKgs: addMoney(
+        sum.kyrgyzstanTransportPaymentsKgs,
+        row.kyrgyzstanTransportPaymentsKgs,
+      ),
       warehouseRentKgs: addMoney(sum.warehouseRentKgs, row.warehouseRentKgs),
       stationeryKgs: addMoney(sum.stationeryKgs, row.stationeryKgs),
       ownerSalaryKgs: addMoney(sum.ownerSalaryKgs, row.ownerSalaryKgs),
@@ -212,7 +272,9 @@ export function cashFlowNetMovement(buckets: CashFlowBuckets) {
     .plus(buckets.customerCollectionsKgs)
     .plus(buckets.otherCashInKgs);
   const outflow = roundMoney(buckets.supplierPaymentsKgs)
+    .plus(buckets.chinaTransportPaymentsKgs)
     .plus(buckets.cargoPaymentsKgs)
+    .plus(buckets.kyrgyzstanTransportPaymentsKgs)
     .plus(buckets.warehouseRentKgs)
     .plus(buckets.stationeryKgs)
     .plus(buckets.ownerSalaryKgs)
@@ -322,9 +384,10 @@ export function buildBalanceSheet(lines: PostedReportLine[]) {
 
   const supplierApKgs = moneyStr(creditNormalBalance(lines, ACCOUNT_CODE.SUPPLIER_AP));
   const cargoApKgs = moneyStr(creditNormalBalance(lines, ACCOUNT_CODE.CARGO_AP));
+  const transportApKgs = moneyStr(creditNormalBalance(lines, ACCOUNT_CODE.TRANSPORT_AP));
   const otherPayablesKgs = '0.00';
   const totalLiabilitiesKgs = moneyStr(
-    roundMoney(supplierApKgs).plus(cargoApKgs).plus(otherPayablesKgs),
+    roundMoney(supplierApKgs).plus(cargoApKgs).plus(transportApKgs).plus(otherPayablesKgs),
   );
 
   const investorCapitalKgs = moneyStr(creditNormalBalance(lines, ACCOUNT_CODE.INVESTOR_CAPITAL));
@@ -357,6 +420,7 @@ export function buildBalanceSheet(lines: PostedReportLine[]) {
     liabilities: {
       supplierApKgs,
       cargoApKgs,
+      transportApKgs,
       otherPayablesKgs,
       totalLiabilitiesKgs,
     },
@@ -393,6 +457,7 @@ export function buildFinanceDashboard(params: {
     accountsReceivableKgs: balanceSheet.assets.accountsReceivableKgs,
     supplierDebtKgs: balanceSheet.liabilities.supplierApKgs,
     cargoDebtKgs: balanceSheet.liabilities.cargoApKgs,
+    transportDebtKgs: balanceSheet.liabilities.transportApKgs,
     salesRevenueKgs: profitAndLoss.salesRevenueKgs,
     cogsKgs: profitAndLoss.cogsKgs,
     grossProfitKgs: profitAndLoss.grossProfitKgs,

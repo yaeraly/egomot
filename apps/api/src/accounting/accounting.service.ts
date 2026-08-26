@@ -358,22 +358,29 @@ export class AccountingService {
     const supplier = await db.supplierPayable.findUnique({
       where: { purchaseId },
     });
+    const logisticsRows = await db.purchaseLogisticsExpense.findMany({
+      where: { purchaseId, journalId: { not: null } },
+    });
+    const linkedCargoIds = new Set(
+      logisticsRows.map((row) => row.cargoPayableId).filter((id): id is string => Boolean(id)),
+    );
     const cargoRows = await db.cargoPayable.findMany({
       where: { purchaseId },
     });
-    if (!supplier && cargoRows.length === 0) {
+    const legacyCargo = cargoRows.filter((row) => !linkedCargoIds.has(row.id));
+    if (!supplier && logisticsRows.length === 0 && legacyCargo.length === 0) {
       return;
     }
 
     const paid = roundMoney(
-      (supplier ? dec(supplier.paidAmountKgs) : dec(0)).plus(
-        cargoRows.reduce((sum, row) => sum.plus(dec(row.paidAmountKgs)), dec(0)),
-      ),
+      (supplier ? dec(supplier.paidAmountKgs) : dec(0))
+        .plus(logisticsRows.reduce((sum, row) => sum.plus(dec(row.paidAmountKgs)), dec(0)))
+        .plus(legacyCargo.reduce((sum, row) => sum.plus(dec(row.paidAmountKgs)), dec(0))),
     );
     const remaining = roundMoney(
-      (supplier ? dec(supplier.remainingAmountKgs) : dec(0)).plus(
-        cargoRows.reduce((sum, row) => sum.plus(dec(row.remainingAmountKgs)), dec(0)),
-      ),
+      (supplier ? dec(supplier.remainingAmountKgs) : dec(0))
+        .plus(logisticsRows.reduce((sum, row) => sum.plus(dec(row.remainingAmountKgs)), dec(0)))
+        .plus(legacyCargo.reduce((sum, row) => sum.plus(dec(row.remainingAmountKgs)), dec(0))),
     );
     const total = roundMoney(paid.plus(remaining));
     await db.purchase.update({

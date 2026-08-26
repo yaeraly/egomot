@@ -5,6 +5,7 @@ Decimal.set({ precision: 40, rounding: Decimal.ROUND_HALF_UP });
 export { Decimal };
 
 export const MONEY_DP = 2;
+export const ORIGINAL_AMOUNT_DP = 6;
 export const WEIGHT_DP = 3;
 export const RATE_DP = 6;
 export const UNIT_COST_DP = 4;
@@ -30,6 +31,10 @@ export function roundMoney(value: Decimal.Value): Decimal {
   return roundTo(value, MONEY_DP);
 }
 
+export function roundOriginalAmount(value: Decimal.Value): Decimal {
+  return roundTo(value, ORIGINAL_AMOUNT_DP);
+}
+
 export function roundWeight(value: Decimal.Value): Decimal {
   return roundTo(value, WEIGHT_DP);
 }
@@ -48,6 +53,10 @@ export function roundUnitCost(value: Decimal.Value): Decimal {
 
 export function moneyStr(value: Decimal.Value): string {
   return roundMoney(value).toFixed(MONEY_DP);
+}
+
+export function amountStr(value: Decimal.Value): string {
+  return roundOriginalAmount(value).toFixed(ORIGINAL_AMOUNT_DP);
 }
 
 export function weightStr(value: Decimal.Value): string {
@@ -215,7 +224,7 @@ export function calculatePurchase(input: PurchaseCalcInput): PurchaseCalculation
 
   const logistics: CalculatedLogistics[] = input.logistics.map((row) => ({
     type: row.type,
-    amount: roundMoney(row.amount),
+    amount: roundOriginalAmount(row.amount),
     currency: row.currency,
     exchangeRate:
       row.currency === 'KGS'
@@ -246,10 +255,13 @@ export function calculatePurchase(input: PurchaseCalcInput): PurchaseCalculation
     items.reduce((sum, item) => sum.plus(item.totalWeightKg), dec(0)),
   );
 
-  if (logisticsTotal.gt(0) && totalWeightKg.lte(0)) {
-    throw new PurchaseValidationError([
-      'Нельзя распределить логистику: общий вес закупки равен нулю',
-    ]);
+  if (logisticsTotal.gt(0)) {
+    const missingWeight = items.some(
+      (item) => item.unitWeightKg.lte(0) || item.totalWeightKg.lte(0),
+    );
+    if (missingWeight || totalWeightKg.lte(0)) {
+      throw new PurchaseValidationError(['Не указан вес товара']);
+    }
   }
 
   const chinaAlloc = allocateByWeight(weights, chinaTotal);

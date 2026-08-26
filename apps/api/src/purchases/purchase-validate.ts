@@ -55,10 +55,10 @@ export function validatePurchaseInput(input: {
 
     try {
       if (dec(item.unitWeightKg).lte(0)) {
-        messages.push(`${label}: вес единицы должен быть больше 0`);
+        messages.push('Не указан вес товара');
       }
     } catch {
-      messages.push(`${label}: некорректный вес единицы`);
+      messages.push('Не указан вес товара');
     }
   });
 

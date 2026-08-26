@@ -21,8 +21,10 @@ import {
 } from '../common/date.util';
 import {
   calculatePurchase,
+  PurchaseCalcInput,
   PurchaseCalculation,
   PurchaseValidationError,
+  dec,
   moneyStr,
   roundMoney,
 } from './purchase-calc';
@@ -45,7 +47,7 @@ import { payableStatusFromAmounts, remainingPayableAmount } from '../accounting/
 export class PurchasesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private runCalc(dto: UpsertPurchaseDto): PurchaseCalculation {
+  private runCalc(dto: PurchaseCalcInput & { supplierId?: string | null }): PurchaseCalculation {
     try {
       validatePurchaseInput(dto);
       return calculatePurchase(dto);
@@ -108,7 +110,41 @@ export class PurchasesService {
     }
     if (purchase.logistics) {
       result.logistics = purchase.logistics.map((row) => this.serializeLogistics(row));
+      const logisticsPaid = (purchase.logistics as Array<{ paidAmountKgs?: Prisma.Decimal }>).reduce(
+        (sum, row) => sum.plus(dec(row.paidAmountKgs ?? 0)),
+        dec(0),
+      );
+      const logisticsUnpaid = (purchase.logistics as Array<{ remainingAmountKgs?: Prisma.Decimal }>).reduce(
+        (sum, row) => sum.plus(dec(row.remainingAmountKgs ?? 0)),
+        dec(0),
+      );
+      result.logisticsPaidAmountKgs = publicDecimal(logisticsPaid);
+      result.logisticsUnpaidAmountKgs = publicDecimal(logisticsUnpaid);
+    } else {
+      result.logisticsPaidAmountKgs = result.logisticsPaidAmountKgs ?? '0.00';
+      result.logisticsUnpaidAmountKgs = result.logisticsUnpaidAmountKgs ?? '0.00';
     }
+
+    const payables = purchase.supplierPayables as
+      | Array<{ paidAmountKgs: Prisma.Decimal; remainingAmountKgs: Prisma.Decimal }>
+      | undefined;
+    if (payables && payables.length > 0) {
+      const supplierPaid = payables.reduce((sum, row) => sum.plus(dec(row.paidAmountKgs)), dec(0));
+      const supplierUnpaid = payables.reduce(
+        (sum, row) => sum.plus(dec(row.remainingAmountKgs)),
+        dec(0),
+      );
+      result.supplierPaidAmountKgs = publicDecimal(supplierPaid);
+      result.supplierUnpaidAmountKgs = publicDecimal(supplierUnpaid);
+    } else {
+      result.supplierPaidAmountKgs = '0.00';
+      result.supplierUnpaidAmountKgs = result.totalPurchaseCostKgs;
+    }
+    result.totalUnpaidAmountKgs = publicDecimal(
+      dec(String(result.supplierUnpaidAmountKgs ?? 0)).plus(
+        dec(String(result.logisticsUnpaidAmountKgs ?? 0)),
+      ),
+    );
     return result;
   }
 
@@ -140,19 +176,42 @@ export class PurchasesService {
   }
 
   private serializeLogistics(row: Record<string, unknown>) {
+    const paymentAccount = row.paymentAccount as
+      | { id: string; name: string; paymentMethod?: { code: string } }
+      | null
+      | undefined;
     return {
       ...row,
+      expenseDate: formatBusinessDate(row.expenseDate as Date | null),
+      paidAt: row.paidAt ? (row.paidAt as Date).toISOString() : null,
       amount: publicDecimal(row.amount as Prisma.Decimal),
       exchangeRate: row.exchangeRate ? publicDecimal(row.exchangeRate as Prisma.Decimal) : null,
       amountKgs: publicDecimal(row.amountKgs as Prisma.Decimal),
+      paidAmountKgs:
+        row.paidAmountKgs != null ? publicDecimal(row.paidAmountKgs as Prisma.Decimal) : '0.00',
+      remainingAmountKgs:
+        row.remainingAmountKgs != null
+          ? publicDecimal(row.remainingAmountKgs as Prisma.Decimal)
+          : publicDecimal(row.amountKgs as Prisma.Decimal),
+      paymentAccount: paymentAccount
+        ? {
+            id: paymentAccount.id,
+            name: paymentAccount.name,
+            paymentMethodCode: paymentAccount.paymentMethod?.code ?? null,
+          }
+        : null,
     };
   }
 
   private include() {
     return {
       supplier: true,
+      supplierPayables: true,
       items: { include: { product: { include: { category: true } } }, orderBy: { createdAt: 'asc' as const } },
-      logistics: { orderBy: { createdAt: 'asc' as const } },
+      logistics: {
+        include: { paymentAccount: { include: { paymentMethod: true } } },
+        orderBy: { createdAt: 'asc' as const },
+      },
     };
   }
 
@@ -220,7 +279,7 @@ export class PurchasesService {
       })),
       logistics: calc.logistics.map((row) => ({
         ...row,
-        amount: row.amount.toFixed(2),
+        amount: row.amount.toFixed(6),
         exchangeRate: row.exchangeRate ? row.exchangeRate.toFixed(6) : null,
         amountKgs: row.amountKgs.toFixed(2),
       })),
@@ -328,15 +387,25 @@ export class PurchasesService {
     };
   }
 
-  private logisticsData(purchaseId: string, row: PurchaseCalculation['logistics'][number]) {
+  private logisticsData(
+    purchaseId: string,
+    row: PurchaseCalculation['logistics'][number],
+    expenseDate: Date | null,
+    userId: string,
+  ) {
     return {
       purchaseId,
       type: row.type as LogisticsType,
-      amount: row.amount.toFixed(2),
+      expenseDate: expenseDate ?? new Date(),
+      amount: row.amount.toFixed(6),
       currency: row.currency as Currency,
       exchangeRate: row.exchangeRate ? row.exchangeRate.toFixed(6) : null,
       amountKgs: row.amountKgs.toFixed(2),
+      paidAmountKgs: '0.00',
+      remainingAmountKgs: row.amountKgs.toFixed(2),
+      status: PayableStatus.UNPAID,
       comment: row.comment,
+      createdByUserId: userId,
     };
   }
 
@@ -476,7 +545,9 @@ export class PurchasesService {
       await this.syncProductPurchasePrices(tx, user.id, purchase.id, calc.items);
       if (calc.logistics.length > 0) {
         await tx.purchaseLogisticsExpense.createMany({
-          data: calc.logistics.map((row) => this.logisticsData(purchase.id, row)),
+          data: calc.logistics.map((row) =>
+            this.logisticsData(purchase.id, row, purchaseDate, user.id),
+          ),
         });
       }
 
@@ -508,14 +579,29 @@ export class PurchasesService {
     });
     if (!existing) throw new NotFoundException('Закупка не найдена');
 
-    await this.assertRefs(dto);
-    const calc = this.runCalc(dto);
+    const postedLogistics = existing.logistics.filter((row) => row.journalId);
+    const calcInput =
+      postedLogistics.length > 0
+        ? {
+            ...dto,
+            logistics: existing.logistics.map((row) => ({
+              type: row.type,
+              amount: row.amount,
+              currency: row.currency,
+              exchangeRate: row.exchangeRate,
+              comment: row.comment,
+            })),
+          }
+        : dto;
+    const calc = this.runCalc(calcInput);
     const purchaseDate = parseBusinessDate(dto.purchaseDate, 'Дата закупки');
     const previous = this.snapshotFromRecord(existing);
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.purchaseItem.deleteMany({ where: { purchaseId: id } });
-      await tx.purchaseLogisticsExpense.deleteMany({ where: { purchaseId: id } });
+      if (postedLogistics.length === 0) {
+        await tx.purchaseLogisticsExpense.deleteMany({ where: { purchaseId: id } });
+      }
 
       await tx.purchase.update({
         where: { id },
@@ -537,9 +623,9 @@ export class PurchasesService {
         data: calc.items.map((item) => this.itemData(id, item)),
       });
       await this.syncProductPurchasePrices(tx, user.id, id, calc.items);
-      if (calc.logistics.length > 0) {
+      if (postedLogistics.length === 0 && calc.logistics.length > 0) {
         await tx.purchaseLogisticsExpense.createMany({
-          data: calc.logistics.map((row) => this.logisticsData(id, row)),
+          data: calc.logistics.map((row) => this.logisticsData(id, row, purchaseDate, user.id)),
         });
       }
 

@@ -241,10 +241,17 @@ describe('purchase validation', () => {
     ).not.toThrow();
   });
 
-  it('rejects weight-based allocation when total weight is zero', () => {
-    expect(() => allocateByWeight([dec(0), dec(0)], roundMoney(100))).toThrow(
-      /общий вес закупки равен нулю/,
-    );
+  it('rejects logistics allocation when a product has no weight', () => {
+    expect(() =>
+      calculatePurchase({
+        exchangeRateCnyToKgs: 1,
+        items: [
+          { productId: 'a', quantity: 10, unitPriceCny: 1, unitWeightKg: 6 },
+          { productId: 'b', quantity: 5, unitPriceCny: 1, unitWeightKg: 0 },
+        ],
+        logistics: [{ type: 'CARGO', amount: 100000, currency: 'KGS' }],
+      }),
+    ).toThrow(/Не указан вес товара/);
   });
 });
 

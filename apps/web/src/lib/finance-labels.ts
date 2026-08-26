@@ -5,6 +5,7 @@ export const FINANCE_CHART_ACCOUNT_LABELS: Record<string, string> = {
   '1200': 'Товары на складе',
   '2000': 'Долг поставщикам',
   '2010': 'Долг за карго',
+  '2020': 'Долг за транспорт',
   '3000': 'Капитал инвестора',
   '3010': 'Изъятие владельца',
   '3020': 'Нераспределённая прибыль',
@@ -24,9 +25,9 @@ export const EXPENSE_CATEGORY_LABELS: Record<string, string> = {
 };
 
 export const PAYABLE_STATUS_LABELS: Record<string, string> = {
-  UNPAID: 'Не оплачен',
-  PARTIAL: 'Частично',
-  PAID: 'Оплачен',
+  UNPAID: 'Не оплачено',
+  PARTIAL: 'Частично оплачено',
+  PAID: 'Оплачено',
 };
 
 export function chartAccountLabel(code: string | undefined, fallback?: string) {

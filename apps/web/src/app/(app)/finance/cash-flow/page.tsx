@@ -12,7 +12,9 @@ interface CashFlowBuckets {
   customerCollectionsKgs: string;
   otherCashInKgs: string;
   supplierPaymentsKgs: string;
+  chinaTransportPaymentsKgs: string;
   cargoPaymentsKgs: string;
+  kyrgyzstanTransportPaymentsKgs: string;
   warehouseRentKgs: string;
   stationeryKgs: string;
   ownerSalaryKgs: string;
@@ -82,7 +84,9 @@ export default function CashFlowPage() {
         <Row label="Итого поступления" value={data?.totalCashInKgs} />
         <p className="pt-2 text-sm font-semibold">− Выплаты</p>
         <Row label="Оплата поставщикам" value={data?.supplierPaymentsKgs} />
+        <Row label="Оплата транспорта по Китаю" value={data?.chinaTransportPaymentsKgs} />
         <Row label="Оплата карго" value={data?.cargoPaymentsKgs} />
+        <Row label="Оплата транспорта по Кыргызстану" value={data?.kyrgyzstanTransportPaymentsKgs} />
         <Row label="Аренда склада" value={data?.warehouseRentKgs} />
         <Row label="Канцтовары" value={data?.stationeryKgs} />
         <Row label="Зарплата владельца" value={data?.ownerSalaryKgs} />
@@ -112,8 +116,18 @@ export default function CashFlowPage() {
               {Number(period.supplierPaymentsKgs) !== 0 ? (
                 <p className="text-sm">Оплата поставщикам — {moneySom(period.supplierPaymentsKgs)}</p>
               ) : null}
+              {Number(period.chinaTransportPaymentsKgs) !== 0 ? (
+                <p className="text-sm">
+                  Оплата транспорта по Китаю — {moneySom(period.chinaTransportPaymentsKgs)}
+                </p>
+              ) : null}
               {Number(period.cargoPaymentsKgs) !== 0 ? (
                 <p className="text-sm">Оплата карго — {moneySom(period.cargoPaymentsKgs)}</p>
+              ) : null}
+              {Number(period.kyrgyzstanTransportPaymentsKgs) !== 0 ? (
+                <p className="text-sm">
+                  Оплата транспорта по Кыргызстану — {moneySom(period.kyrgyzstanTransportPaymentsKgs)}
+                </p>
               ) : null}
               {Number(period.warehouseRentKgs) !== 0 ? (
                 <p className="text-sm">Аренда склада — {moneySom(period.warehouseRentKgs)}</p>

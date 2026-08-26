@@ -49,13 +49,12 @@ export function PurchaseSummary({
     ['Вес', weight(totals.totalWeightKg)],
     ['Сумма закупки', money(totals.totalPurchaseCny, 'CNY')],
     ['Курс CNY → KGS', rate(totals.exchangeRateCnyToKgs)],
-    ['Себестоимость закупки', money(totals.totalPurchaseCostKgs, 'KGS')],
-    ['Доставка Китай', money(totals.totalChinaTransportKgs, 'KGS')],
+    ['Стоимость товара', money(totals.totalPurchaseCostKgs, 'KGS')],
+    ['Транспорт по Китаю', money(totals.totalChinaTransportKgs, 'KGS')],
     ['Карго', money(totals.totalCargoKgs, 'KGS')],
-    ['Доставка КР', money(totals.totalKgInternalTransportKgs, 'KGS')],
-    ['Прочая логистика', money(totals.totalOtherLogisticsKgs, 'KGS')],
-    ['Итого логистика', money(totals.totalLogisticsKgs, 'KGS')],
-    ['Ориентир. landed cost', money(totals.estimatedTotalLandedCostKgs, 'KGS')],
+    ['Транспорт по Кыргызстану', money(totals.totalKgInternalTransportKgs, 'KGS')],
+    ['Общие логистические расходы', money(totals.totalLogisticsKgs, 'KGS')],
+    ['Итоговая себестоимость закупки', money(totals.estimatedTotalLandedCostKgs, 'KGS')],
     ['Логистика за кг', money(totals.averageLogisticsCostPerKg, 'KGS/кг')],
   ];
 

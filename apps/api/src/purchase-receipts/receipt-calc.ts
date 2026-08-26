@@ -120,10 +120,13 @@ export function calculateReceipt(input: ReceiptCalcInput): ReceiptCalculation {
   const weights = items.map((item) => item.totalWeightKg);
   const totalWeightKg = roundWeight(weights.reduce((sum, w) => sum.plus(w), dec(0)));
 
-  if (transportTotal.gt(0) && totalWeightKg.lte(0)) {
-    throw new PurchaseValidationError([
-      'Нельзя распределить транспорт: общий вес принятого товара равен нулю',
-    ]);
+  if (transportTotal.gt(0)) {
+    const missingWeight = items.some(
+      (item) => item.unitWeightKg.lte(0) || item.totalWeightKg.lte(0),
+    );
+    if (missingWeight || totalWeightKg.lte(0)) {
+      throw new PurchaseValidationError(['Не указан вес товара']);
+    }
   }
 
   const chinaAlloc = allocateByWeight(weights, chinaTotal);
