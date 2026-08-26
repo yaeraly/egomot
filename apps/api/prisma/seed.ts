@@ -17,6 +17,8 @@ import {
   DEFAULT_CATEGORY_THRESHOLDS,
   DEFAULT_MARKUP_MATRIX,
 } from './pricing-defaults';
+import { bootstrapAccountingLedger } from '../src/accounting/accounting.bootstrap';
+import { COMPANY_PAYMENT_METHOD_CODES } from '../src/accounting/accounting-codes';
 
 const prisma = new PrismaClient();
 
@@ -170,7 +172,9 @@ async function seedSalesOperator() {
     },
   });
 
-  const methods = await prisma.paymentMethod.findMany({ where: { isActive: true } });
+  const methods = await prisma.paymentMethod.findMany({
+    where: { isActive: true, NOT: { code: { in: [...COMPANY_PAYMENT_METHOD_CODES] } } },
+  });
   for (const method of methods) {
     await prisma.paymentAccount.upsert({
       where: {
@@ -217,6 +221,7 @@ async function main() {
   await seedOwner();
   await seedSalesOperator();
   await seedWalkInCustomer();
+  await bootstrapAccountingLedger(prisma);
   const ownerCount = await prisma.user.count({ where: { role: UserRole.OWNER } });
   const salesCount = await prisma.user.count({ where: { role: UserRole.SALES } });
   // eslint-disable-next-line no-console

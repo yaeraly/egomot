@@ -16,6 +16,7 @@ import { FinanceModule } from './finance/finance.module';
 import { SalesModule } from './sales/sales.module';
 import { UsersModule } from './users/users.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
+import { AccountingModule } from './accounting/accounting.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     ClientsModule,
     PricingModule,
     FinanceModule,
+    AccountingModule,
     SalesModule,
   ],
 })

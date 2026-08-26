@@ -1,0 +1,424 @@
+import {
+  AccountingSourceType,
+  ClientDebtTransactionType,
+  PayableStatus,
+  PrismaClient,
+  PurchaseReceiptStatus,
+  JournalStatus,
+} from '@prisma/client';
+import { publicDecimal } from '../common/decimal.util';
+import { moneyStr, roundMoney, dec } from '../purchases/purchase-calc';
+import {
+  OPENING_INVESTOR_CAPITAL_SOURCE_ID,
+  UNSPECIFIED_CARGO_VENDOR_NAME,
+} from './accounting-codes';
+import {
+  parseBackfillArgs,
+  planHistoricalBackfill,
+  formatHistoricalBackfillReport,
+  evaluateBackfillStatus,
+  purchaseRecognitionAmounts,
+  type BackfillPurchaseInput,
+  type BackfillSaleInput,
+  type HistoricalBackfillSnapshot,
+  type PlannedBackfillJournal,
+} from './accounting-backfill.logic';
+import {
+  remainingPayableAmount,
+  payableStatusFromAmounts,
+} from './accounting-journal.logic';
+import { persistPostedJournal } from './accounting-journal.store';
+import {
+  WALK_IN_CUSTOMER_NAME,
+  WALK_IN_CUSTOMER_PHONE,
+} from '../sales/historical-sales-import.logic';
+
+export type BackfillApplyResult = {
+  created: number;
+  skippedDuplicates: number;
+  report: string;
+  status: 'PASS' | 'BLOCKED';
+  dryRun: boolean;
+};
+
+function key(sourceType: string, sourceId: string) {
+  return `${sourceType}:${sourceId}`;
+}
+
+export async function loadHistoricalBackfillSnapshot(
+  prisma: PrismaClient,
+): Promise<HistoricalBackfillSnapshot> {
+  const [sales, purchases, journals, opening, walletSum, inventorySum, arSum] =
+    await Promise.all([
+      prisma.sale.findMany({
+        include: {
+          client: true,
+          items: true,
+          payments: { include: { paymentMethod: true, debtTransaction: true } },
+          debtTransactions: true,
+        },
+        orderBy: { saleDate: 'asc' },
+      }),
+      prisma.purchase.findMany({
+        include: {
+          receipts: true,
+          purchasePayments: {
+            include: { paymentAccount: { include: { paymentMethod: true } } },
+          },
+          cargoPayables: {
+            include: {
+              payments: {
+                include: { paymentAccount: { include: { paymentMethod: true } } },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.journal.findMany({
+        where: {
+          status: JournalStatus.POSTED,
+          sourceType: {
+            in: [
+              AccountingSourceType.SALE,
+              AccountingSourceType.SALE_REVENUE,
+              AccountingSourceType.SALE_COGS,
+              AccountingSourceType.SALE_DEBT_PAYMENT,
+              AccountingSourceType.PURCHASE,
+              AccountingSourceType.PURCHASE_RECEIPT,
+              AccountingSourceType.PURCHASE_PAYMENT,
+              AccountingSourceType.CARGO,
+              AccountingSourceType.CARGO_PAYMENT,
+            ],
+          },
+        },
+        select: { sourceType: true, sourceId: true },
+      }),
+      prisma.journal.findFirst({
+        where: {
+          status: JournalStatus.POSTED,
+          sourceType: AccountingSourceType.OPENING_BALANCE,
+          sourceId: OPENING_INVESTOR_CAPITAL_SOURCE_ID,
+        },
+        include: { lines: { include: { account: true } } },
+      }),
+      prisma.financialTransaction.aggregate({ _sum: { amountKgs: true } }),
+      prisma.inventory.aggregate({ _sum: { totalValueKgs: true } }),
+      prisma.sale.aggregate({
+        where: { status: { in: ['CONFIRMED', 'COMPLETED'] } },
+        _sum: { debtAmountKgs: true },
+      }),
+    ]);
+
+  const posted = new Set(journals.map((row) => key(row.sourceType, row.sourceId)));
+
+  const saleInputs: BackfillSaleInput[] = sales.map((sale) => ({
+    id: sale.id,
+    number: sale.number,
+    status: sale.status,
+    totalAmountKgs: publicDecimal(sale.totalAmountKgs),
+    paidAmountKgs: publicDecimal(sale.paidAmountKgs),
+    debtAmountKgs: publicDecimal(sale.debtAmountKgs),
+    saleDate: sale.saleDate,
+    isWalkIn:
+      sale.client.name === WALK_IN_CUSTOMER_NAME ||
+      sale.client.phone === WALK_IN_CUSTOMER_PHONE,
+    items: sale.items.map((item) => ({
+      quantity: publicDecimal(item.quantity),
+      unitCostKgs: publicDecimal(item.unitCostKgs),
+    })),
+    payments: sale.payments.map((payment) => ({
+      id: payment.id,
+      amountKgs: publicDecimal(payment.amountKgs),
+      paymentMethodCode: payment.paymentMethod.code,
+      isDebtCollection:
+        payment.debtTransaction?.type === ClientDebtTransactionType.DEBT_PAYMENT ||
+        sale.debtTransactions.some(
+          (row) =>
+            row.paymentId === payment.id &&
+            row.type === ClientDebtTransactionType.DEBT_PAYMENT,
+        ),
+    })),
+    alreadyPosted: {
+      liveSale: posted.has(key(AccountingSourceType.SALE, sale.id)),
+      revenue: posted.has(key(AccountingSourceType.SALE_REVENUE, sale.id)),
+      cogs: posted.has(key(AccountingSourceType.SALE_COGS, sale.id)),
+      debtPaymentIds: sale.payments
+        .filter((payment) =>
+          posted.has(key(AccountingSourceType.SALE_DEBT_PAYMENT, payment.id)),
+        )
+        .map((payment) => payment.id),
+    },
+  }));
+
+  const purchaseInputs: BackfillPurchaseInput[] = purchases.map((purchase) => {
+    const completedReceipts = purchase.receipts
+      .filter((receipt) => receipt.status === PurchaseReceiptStatus.COMPLETED)
+      .map((receipt) => ({
+        id: receipt.id,
+        totalLandedCostKgs: publicDecimal(receipt.totalLandedCostKgs),
+        cargoKgs: publicDecimal(receipt.cargoKgs),
+        alreadyPostedReceipt: posted.has(
+          key(AccountingSourceType.PURCHASE_RECEIPT, receipt.id),
+        ),
+      }));
+    const cargoPayments = purchase.cargoPayables.flatMap((payable) =>
+      payable.payments.map((payment) => ({
+        id: payment.id,
+        amountKgs: publicDecimal(payment.amountKgs),
+        paymentMethodCode: payment.paymentAccount.paymentMethod.code,
+      })),
+    );
+    return {
+      id: purchase.id,
+      number: purchase.number,
+      status: purchase.status,
+      supplierId: purchase.supplierId,
+      estimatedTotalLandedCostKgs: publicDecimal(purchase.estimatedTotalLandedCostKgs),
+      totalCargoKgs: publicDecimal(purchase.totalCargoKgs),
+      purchaseDate: purchase.purchaseDate,
+      completedReceipts,
+      purchasePayments: purchase.purchasePayments.map((payment) => ({
+        id: payment.id,
+        amountKgs: publicDecimal(payment.amountKgs),
+        paymentMethodCode: payment.paymentAccount.paymentMethod.code,
+      })),
+      cargoPayments,
+      alreadyPosted: {
+        purchase: posted.has(key(AccountingSourceType.PURCHASE, purchase.id)),
+        cargo: posted.has(key(AccountingSourceType.CARGO, purchase.id)),
+        paymentIds: purchase.purchasePayments
+          .filter((payment) =>
+            posted.has(key(AccountingSourceType.PURCHASE_PAYMENT, payment.id)),
+          )
+          .map((payment) => payment.id),
+        cargoPaymentIds: cargoPayments
+          .filter((payment) =>
+            posted.has(key(AccountingSourceType.CARGO_PAYMENT, payment.id)),
+          )
+          .map((payment) => payment.id),
+      },
+    };
+  });
+
+  let openingCapitalPostedKgs: string | null = null;
+  if (opening) {
+    const cash = opening.lines
+      .filter((line) => line.account.code === '1000')
+      .reduce(
+        (sum, line) => sum.plus(dec(line.debitKgs)).minus(dec(line.creditKgs)),
+        dec(0),
+      );
+    openingCapitalPostedKgs = moneyStr(cash);
+  }
+
+  return {
+    sales: saleInputs,
+    purchases: purchaseInputs,
+    openingCapitalPostedKgs,
+    operationalWalletComputedKgs: moneyStr(walletSum._sum.amountKgs ?? 0),
+    operationalInventoryKgs: moneyStr(inventorySum._sum.totalValueKgs ?? 0),
+    operationalArKgs: moneyStr(arSum._sum.debtAmountKgs ?? 0),
+  };
+}
+
+async function ensureSupplierPayable(
+  prisma: PrismaClient,
+  purchase: BackfillPurchaseInput,
+  journalId: string,
+) {
+  const amounts = purchaseRecognitionAmounts(purchase);
+  if (!amounts.supplier.gt(0)) return;
+  const existing = await prisma.supplierPayable.findUnique({
+    where: { purchaseId: purchase.id },
+  });
+  if (existing) return;
+  await prisma.supplierPayable.create({
+    data: {
+      supplierId: purchase.supplierId,
+      purchaseId: purchase.id,
+      amountKgs: moneyStr(amounts.supplier),
+      paidAmountKgs: '0.00',
+      remainingAmountKgs: moneyStr(amounts.supplier),
+      status: PayableStatus.UNPAID,
+      journalId,
+    },
+  });
+}
+
+async function ensureCargoPayable(
+  prisma: PrismaClient,
+  purchase: BackfillPurchaseInput,
+  journalId: string,
+) {
+  const amounts = purchaseRecognitionAmounts(purchase);
+  if (!amounts.cargo.gt(0)) return;
+  const existing = await prisma.cargoPayable.findFirst({
+    where: { purchaseId: purchase.id },
+  });
+  if (existing) return;
+  const vendor = await prisma.cargoVendor.findFirst({
+    where: { name: UNSPECIFIED_CARGO_VENDOR_NAME },
+  });
+  await prisma.cargoPayable.create({
+    data: {
+      cargoVendorId: vendor?.id ?? null,
+      purchaseId: purchase.id,
+      amountKgs: moneyStr(amounts.cargo),
+      paidAmountKgs: '0.00',
+      remainingAmountKgs: moneyStr(amounts.cargo),
+      status: PayableStatus.UNPAID,
+      journalId,
+    },
+  });
+}
+
+async function applyVerifiedPayablePayment(
+  prisma: PrismaClient,
+  kind: 'supplier' | 'cargo',
+  purchaseId: string,
+  amountKgs: string,
+) {
+  if (kind === 'supplier') {
+    const row = await prisma.supplierPayable.findUnique({ where: { purchaseId } });
+    if (!row) return;
+    const newPaid = roundMoney(dec(row.paidAmountKgs).plus(amountKgs));
+    const remaining = remainingPayableAmount(row.amountKgs, newPaid);
+    await prisma.supplierPayable.update({
+      where: { id: row.id },
+      data: {
+        paidAmountKgs: moneyStr(newPaid),
+        remainingAmountKgs: moneyStr(remaining),
+        status: payableStatusFromAmounts(row.amountKgs, newPaid) as PayableStatus,
+      },
+    });
+    return;
+  }
+  const row = await prisma.cargoPayable.findFirst({
+    where: { purchaseId },
+    orderBy: { createdAt: 'asc' },
+  });
+  if (!row) return;
+  const newPaid = roundMoney(dec(row.paidAmountKgs).plus(amountKgs));
+  const remaining = remainingPayableAmount(row.amountKgs, newPaid);
+  await prisma.cargoPayable.update({
+    where: { id: row.id },
+    data: {
+      paidAmountKgs: moneyStr(newPaid),
+      remainingAmountKgs: moneyStr(remaining),
+      status: payableStatusFromAmounts(row.amountKgs, newPaid) as PayableStatus,
+    },
+  });
+}
+
+export async function applyHistoricalBackfill(
+  prisma: PrismaClient,
+  planned: PlannedBackfillJournal[],
+  purchasesById: Map<string, BackfillPurchaseInput>,
+  createdByUserId: string,
+): Promise<{ created: number; skippedDuplicates: number }> {
+  let created = 0;
+  let skippedDuplicates = 0;
+
+  for (const journal of planned) {
+    const existing = await prisma.journal.findFirst({
+      where: {
+        sourceType: journal.sourceType as AccountingSourceType,
+        sourceId: journal.sourceId,
+        status: JournalStatus.POSTED,
+      },
+    });
+    if (existing) {
+      skippedDuplicates += 1;
+      continue;
+    }
+
+    const posted = await persistPostedJournal(prisma, {
+      sourceType: journal.sourceType as AccountingSourceType,
+      sourceId: journal.sourceId,
+      memo: journal.memo,
+      lines: journal.lines,
+      createdByUserId,
+      postedAt: journal.postedAt,
+    });
+    created += 1;
+
+    const purchase = journal.purchaseId ? purchasesById.get(journal.purchaseId) : undefined;
+    if (journal.sourceType === 'PURCHASE' && purchase) {
+      await ensureSupplierPayable(prisma, purchase, posted.id);
+    }
+    if (journal.sourceType === 'CARGO' && purchase) {
+      await ensureCargoPayable(prisma, purchase, posted.id);
+    }
+    if (journal.sourceType === 'PURCHASE_PAYMENT' && journal.purchaseId && journal.lines[0]) {
+      await applyVerifiedPayablePayment(
+        prisma,
+        'supplier',
+        journal.purchaseId,
+        journal.lines[0].debitKgs,
+      );
+    }
+    if (journal.sourceType === 'CARGO_PAYMENT' && journal.purchaseId && journal.lines[0]) {
+      await applyVerifiedPayablePayment(
+        prisma,
+        'cargo',
+        journal.purchaseId,
+        journal.lines[0].debitKgs,
+      );
+    }
+  }
+
+  return { created, skippedDuplicates };
+}
+
+export async function runHistoricalBackfill(
+  prisma: PrismaClient,
+  argv: string[],
+): Promise<BackfillApplyResult> {
+  const { selection, dryRun, mode } = parseBackfillArgs(argv);
+  const snapshot = await loadHistoricalBackfillSnapshot(prisma);
+  const plan = planHistoricalBackfill(snapshot, selection);
+  let created = 0;
+  let skippedDuplicates = plan.totals.skippedCount;
+
+  if (!dryRun) {
+    const owner = await prisma.user.findFirst({
+      where: { role: 'OWNER', isActive: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!owner) {
+      throw new Error('Historical backfill requires an OWNER user');
+    }
+    const purchasesById = new Map(snapshot.purchases.map((row) => [row.id, row]));
+    const applied = await applyHistoricalBackfill(
+      prisma,
+      plan.planned,
+      purchasesById,
+      owner.id,
+    );
+    created = applied.created;
+    skippedDuplicates += applied.skippedDuplicates;
+  }
+
+  const evaluation = evaluateBackfillStatus(plan, mode);
+  const extra = [
+    '',
+    dryRun ? 'Dry run: no journals created.' : `Journals created: ${created}`,
+    `Duplicates skipped: ${skippedDuplicates}`,
+    snapshot.openingCapitalPostedKgs
+      ? `Opening capital journal found: ${snapshot.openingCapitalPostedKgs}`
+      : 'Opening capital journal NOT found (not created by this command).',
+    `Computed operational wallet: ${snapshot.operationalWalletComputedKgs}`,
+    'Opening investor capital was not posted by this command.',
+    'Purchase.status=PAID was not treated as cash evidence.',
+    '9,167,215 operational wallet was not used as opening cash or a plug.',
+  ];
+
+  return {
+    created,
+    skippedDuplicates,
+    report: `${formatHistoricalBackfillReport(plan, mode)}\n${extra.join('\n')}`,
+    status: evaluation.status,
+    dryRun,
+  };
+}

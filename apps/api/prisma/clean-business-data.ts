@@ -32,6 +32,17 @@ const ALL_TABLE_COUNTS = {
   saleReturns: () => prisma.saleReturn.count(),
   auditLogs: () => prisma.auditLog.count(),
   productPurchasePriceHistory: () => prisma.productPurchasePriceHistory.count(),
+  journals: () => prisma.journal.count(),
+  journalLines: () => prisma.journalLine.count(),
+  supplierPayables: () => prisma.supplierPayable.count(),
+  cargoPayables: () => prisma.cargoPayable.count(),
+  purchasePayments: () => prisma.purchasePayment.count(),
+  cargoPayments: () => prisma.cargoPayment.count(),
+  operatingExpenses: () => prisma.operatingExpense.count(),
+  ownerWithdrawals: () => prisma.ownerWithdrawal.count(),
+  cargoVendors: () => prisma.cargoVendor.count(),
+  chartAccounts: () => prisma.chartAccount.count(),
+  accountingPeriods: () => prisma.accountingPeriod.count(),
   paymentMethods: () => prisma.paymentMethod.count(),
   paymentAccounts: () => prisma.paymentAccount.count(),
   categoryThresholds: () => prisma.clientCategoryThreshold.count(),
@@ -57,6 +68,8 @@ const PRESERVED_TABLES = [
   'PaymentAccount',
   'ClientCategoryThreshold',
   'ClientTypeCategoryMarkup',
+  'ChartAccount',
+  'AccountingPeriod',
 ] as const;
 
 function catalogProductCodes(): string[] {
@@ -65,6 +78,14 @@ function catalogProductCodes(): string[] {
 
 /** Delete transactional data in FK-safe order. */
 async function deleteTransactionalData(tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]) {
+  await tx.operatingExpense.deleteMany();
+  await tx.ownerWithdrawal.deleteMany();
+  await tx.purchasePayment.deleteMany();
+  await tx.cargoPayment.deleteMany();
+  await tx.supplierPayable.deleteMany();
+  await tx.cargoPayable.deleteMany();
+  await tx.journal.deleteMany();
+  await tx.cargoVendor.deleteMany();
   await tx.financialTransaction.deleteMany();
   await tx.clientDebtTransaction.deleteMany();
   await tx.payment.deleteMany();
@@ -97,6 +118,8 @@ async function fullDatabaseReset(dryRun: boolean) {
   await prisma.$transaction(async (tx) => {
     await deleteTransactionalData(tx);
     await tx.paymentAccount.deleteMany();
+    await tx.accountingPeriod.deleteMany();
+    await tx.chartAccount.deleteMany();
     await tx.client.deleteMany();
     await tx.product.deleteMany();
     await tx.supplier.deleteMany();
@@ -136,22 +159,24 @@ async function cleanBusinessData(dryRun: boolean) {
   });
 
   console.log('\nWill delete (in dependency order):');
-  console.log('  1. FinancialTransaction');
-  console.log('  2. ClientDebtTransaction');
-  console.log('  3. Payment');
-  console.log('  4. SaleReceipt');
-  console.log('  5. SaleReturn (+ SaleReturnItem cascade)');
-  console.log('  6. Sale (+ SaleItem cascade)');
-  console.log('  7. InventoryMovement');
-  console.log('  8. PurchaseReceiptDiscrepancy');
-  console.log('  9. PurchaseReceipt (+ PurchaseReceiptItem cascade)');
-  console.log(' 10. ProductPurchasePriceHistory');
-  console.log(' 11. Purchase (+ PurchaseItem, PurchaseLogisticsExpense cascade)');
-  console.log(' 12. Inventory');
-  console.log(' 13. AuditLog');
-  console.log(' 14. Client');
-  console.log(' 15. Supplier');
-  console.log(` 16. Non-catalog products (${nonCatalogProducts.length})`);
+  console.log('  1. OperatingExpense / OwnerWithdrawal / AP-Cargo payments');
+  console.log('  2. SupplierPayable / CargoPayable / Journal (+ lines)');
+  console.log('  3. FinancialTransaction');
+  console.log('  4. ClientDebtTransaction');
+  console.log('  5. Payment');
+  console.log('  6. SaleReceipt');
+  console.log('  7. SaleReturn (+ SaleReturnItem cascade)');
+  console.log('  8. Sale (+ SaleItem cascade)');
+  console.log('  9. InventoryMovement');
+  console.log(' 10. PurchaseReceiptDiscrepancy');
+  console.log(' 11. PurchaseReceipt (+ PurchaseReceiptItem cascade)');
+  console.log(' 12. ProductPurchasePriceHistory');
+  console.log(' 13. Purchase (+ PurchaseItem, PurchaseLogisticsExpense cascade)');
+  console.log(' 14. Inventory');
+  console.log(' 15. AuditLog');
+  console.log(' 16. Client');
+  console.log(' 17. Supplier');
+  console.log(` 18. Non-catalog products (${nonCatalogProducts.length})`);
   if (nonCatalogProducts.length > 0) {
     for (const product of nonCatalogProducts) {
       console.log(`      - ${product.code}: ${product.name}`);

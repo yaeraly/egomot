@@ -21,7 +21,8 @@
     "import:historical-sales": "npm run import:historical-sales -w api --",
     "import:historical-purchases": "npm run import:historical-purchases -w api --",
     "sales:delete-all": "npm run sales:delete-all -w api --",
-    "report:inventory-reconciliation": "npm run report:inventory-reconciliation -w api"
+    "report:inventory-reconciliation": "npm run report:inventory-reconciliation -w api",
+    "accounting:backfill": "npm run accounting:backfill -w api --"
   },
   "engines": {
     "node": ">=20"

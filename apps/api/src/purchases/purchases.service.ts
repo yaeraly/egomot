@@ -6,6 +6,7 @@ import {
 import {
   Currency,
   LogisticsType,
+  PayableStatus,
   Prisma,
   PurchaseStatus,
 } from '@prisma/client';
@@ -22,6 +23,8 @@ import {
   calculatePurchase,
   PurchaseCalculation,
   PurchaseValidationError,
+  moneyStr,
+  roundMoney,
 } from './purchase-calc';
 import { validatePurchaseInput } from './purchase-validate';
 import {
@@ -36,6 +39,7 @@ import {
   productPurchasePriceHistoryValues,
   shouldSyncProductPurchasePrice,
 } from './product-purchase-price.sync';
+import { payableStatusFromAmounts, remainingPayableAmount } from '../accounting/accounting-journal.logic';
 
 @Injectable()
 export class PurchasesService {
@@ -69,6 +73,8 @@ export class PurchasesService {
     totalLogisticsKgs: Prisma.Decimal;
     estimatedTotalLandedCostKgs: Prisma.Decimal;
     averageLogisticsCostPerKg: Prisma.Decimal;
+    paidAmountKgs?: Prisma.Decimal;
+    unpaidAmountKgs?: Prisma.Decimal;
     items?: Array<Record<string, unknown>>;
     logistics?: Array<Record<string, unknown>>;
     [key: string]: unknown;
@@ -86,6 +92,8 @@ export class PurchasesService {
       'totalLogisticsKgs',
       'estimatedTotalLandedCostKgs',
       'averageLogisticsCostPerKg',
+      'paidAmountKgs',
+      'unpaidAmountKgs',
     ] as const;
 
     const result: Record<string, unknown> = { ...purchase };
@@ -231,6 +239,31 @@ export class PurchasesService {
         averageLogisticsCostPerKg: calc.totals.averageLogisticsCostPerKg.toFixed(4),
         exchangeRateCnyToKgs: calc.totals.exchangeRateCnyToKgs.toFixed(6),
       },
+    };
+  }
+
+  private async settlementFromEstimateIfNoPayables(
+    tx: Prisma.TransactionClient,
+    purchaseId: string,
+    paidAmountKgs: Prisma.Decimal,
+    estimatedTotalLandedCostKgs: string,
+  ) {
+    const [supplierCount, cargoCount] = await Promise.all([
+      tx.supplierPayable.count({ where: { purchaseId } }),
+      tx.cargoPayable.count({ where: { purchaseId } }),
+    ]);
+    if (supplierCount > 0 || cargoCount > 0) {
+      return {};
+    }
+    const paid = roundMoney(paidAmountKgs);
+    const unpaid = remainingPayableAmount(estimatedTotalLandedCostKgs, paid);
+    return {
+      paidAmountKgs: moneyStr(paid),
+      unpaidAmountKgs: moneyStr(unpaid),
+      payableStatus: payableStatusFromAmounts(
+        estimatedTotalLandedCostKgs,
+        paid,
+      ) as PayableStatus,
     };
   }
 
@@ -430,6 +463,9 @@ export class PurchasesService {
           purchaseDate,
           status: PurchaseStatus.DRAFT,
           notes: dto.notes?.trim() || null,
+          paidAmountKgs: '0.00',
+          unpaidAmountKgs: calc.totals.estimatedTotalLandedCostKgs.toFixed(2),
+          payableStatus: PayableStatus.UNPAID,
           ...this.totalsData(calc),
         },
       });
@@ -488,6 +524,12 @@ export class PurchasesService {
           purchaseDate,
           notes: dto.notes?.trim() || null,
           ...this.totalsData(calc),
+          ...(await this.settlementFromEstimateIfNoPayables(
+            tx,
+            id,
+            existing.paidAmountKgs,
+            moneyStr(calc.totals.estimatedTotalLandedCostKgs),
+          )),
         },
       });
 

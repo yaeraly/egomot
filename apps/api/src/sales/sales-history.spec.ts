@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PricingService } from '../pricing/pricing.service';
 import { ClientCategoryService } from '../pricing/client-category.service';
 import { FinanceBalanceService } from '../finance/finance-balance.service';
+import { AccountingService } from '../accounting/accounting.service';
 import { ClientDebtService } from './client-debt.service';
 import { SaleReceiptService, WhatsAppService } from './sale-receipt.service';
 import { SalesService } from './sales.service';
@@ -84,6 +85,7 @@ describe('SalesService historical edits', () => {
           },
         },
         { provide: FinanceBalanceService, useValue: {} },
+        { provide: AccountingService, useValue: {} },
         {
           provide: ClientDebtService,
           useValue: { getCurrentDebtKgs: jest.fn().mockResolvedValue('0') },

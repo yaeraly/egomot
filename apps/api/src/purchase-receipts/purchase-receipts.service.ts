@@ -22,6 +22,8 @@ import {
   resolveDateRange,
 } from '../common/date.util';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccountingService } from '../accounting/accounting.service';
+import { UNSPECIFIED_CARGO_VENDOR_NAME } from '../accounting/accounting-codes';
 import {
   calculateReceipt,
   computeInventoryAfterReceipt,
@@ -42,7 +44,10 @@ const EDITABLE_RECEIPT_STATUSES: PurchaseReceiptStatus[] = [
 
 @Injectable()
 export class PurchaseReceiptsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly accounting: AccountingService,
+  ) {}
 
   private include() {
     return {
@@ -770,6 +775,20 @@ export class PurchaseReceiptsService {
       await tx.purchase.update({
         where: { id: receipt.purchaseId },
         data: { status: purchaseStatus },
+      });
+
+      const cargoVendor = await tx.cargoVendor.findFirst({
+        where: { name: UNSPECIFIED_CARGO_VENDOR_NAME, isActive: true },
+      });
+      await this.accounting.postPurchaseReceipt(tx, {
+        receiptId: id,
+        purchaseId: receipt.purchaseId,
+        supplierId: receipt.supplierId,
+        inventoryKgs: calc.totals.totalLandedCostKgs,
+        cargoKgs: calc.totals.cargoKgs,
+        createdByUserId: user.id,
+        postedAt: receipt.warehouseReceiptDate,
+        cargoVendorId: cargoVendor?.id ?? null,
       });
 
       const done = await tx.purchaseReceipt.update({

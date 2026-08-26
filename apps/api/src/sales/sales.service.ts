@@ -22,6 +22,7 @@ import { roundMarkup } from '../pricing/pricing-calc';
 import { PricingService } from '../pricing/pricing.service';
 import { ClientCategoryService } from '../pricing/client-category.service';
 import { FinanceBalanceService } from '../finance/finance-balance.service';
+import { AccountingService } from '../accounting/accounting.service';
 import { ClientDebtService } from './client-debt.service';
 import {
   SaleReceiptService,
@@ -65,6 +66,7 @@ export class SalesService {
     private readonly pricing: PricingService,
     private readonly clientCategory: ClientCategoryService,
     private readonly finance: FinanceBalanceService,
+    private readonly accounting: AccountingService,
     private readonly clientDebt: ClientDebtService,
     private readonly receiptService: SaleReceiptService,
     private readonly whatsapp: WhatsAppService,
@@ -370,6 +372,32 @@ export class SalesService {
           });
         }
 
+        const paidSplits: Array<{ paymentMethodCode: string; amountKgs: string }> = [];
+        for (const entry of paymentEntries) {
+          const account = await tx.paymentAccount.findUnique({
+            where: { id: entry.paymentAccountId },
+            include: { paymentMethod: true },
+          });
+          if (account) {
+            paidSplits.push({
+              paymentMethodCode: account.paymentMethod.code,
+              amountKgs: entry.amountKgs,
+            });
+          }
+        }
+
+        await this.accounting.postConfirmedSale(tx, {
+          saleId: sale.id,
+          revenueKgs: totalAmount,
+          paidSplits,
+          items: pricedItems.map((row) => ({
+            quantity: row.quantity,
+            unitCostKgs: row.price.costPriceKgs,
+          })),
+          createdByUserId: user.id,
+          postedAt: saleDateTime,
+        });
+
         const clientTotalDebt = await this.clientDebt.getCurrentDebtKgs(client.id);
 
         const fullSale = await tx.sale.findUniqueOrThrow({
@@ -499,6 +527,24 @@ export class SalesService {
         paidAt,
       );
 
+      const paymentAccount = await tx.paymentAccount.findUnique({
+        where: { id: dto.paymentAccountId },
+        include: { paymentMethod: true },
+      });
+      const payment = await tx.payment.findFirst({
+        where: { saleId, paidAt },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (payment && paymentAccount) {
+        await this.accounting.postDebtCollection(tx, {
+          paymentId: payment.id,
+          amountKgs: amount,
+          paymentMethodCode: paymentAccount.paymentMethod.code,
+          createdByUserId: user.id,
+          postedAt: paidAt,
+        });
+      }
+
       const newPaid = roundMoney(sale.paidAmountKgs.plus(amount));
       const newDebt = roundMoney(sale.debtAmountKgs.minus(amount));
       const paymentStatus =
@@ -513,11 +559,6 @@ export class SalesService {
           fullyPaidAt: newDebt.lte(0) ? paidAt : sale.fullyPaidAt,
         },
         include: this.saleInclude,
-      });
-
-      const payment = await tx.payment.findFirst({
-        where: { saleId, paidAt },
-        orderBy: { createdAt: 'desc' },
       });
 
       await this.clientDebt.recordDebtChange(tx, {

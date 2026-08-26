@@ -102,6 +102,54 @@ enum FinancialTransactionType {
   DEBT_PAYMENT
 }
 
+enum ChartAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  COGS
+  EXPENSE
+}
+
+enum JournalStatus {
+  POSTED
+  VOIDED
+}
+
+enum AccountingPeriodStatus {
+  OPEN
+  CLOSED
+}
+
+enum PayableStatus {
+  UNPAID
+  PARTIAL
+  PAID
+}
+
+enum OperatingExpenseCategory {
+  WAREHOUSE_RENT
+  STATIONERY
+  OWNER_SALARY
+  OTHER
+}
+
+enum AccountingSourceType {
+  OPENING_BALANCE
+  PURCHASE_RECEIPT
+  PURCHASE_PAYMENT
+  CARGO_PAYMENT
+  SALE
+  SALE_DEBT_PAYMENT
+  OPERATING_EXPENSE
+  OWNER_WITHDRAWAL
+  REVERSAL
+  SALE_REVENUE
+  SALE_COGS
+  PURCHASE
+  CARGO
+}
+
 model User {
   id                 String              @id @default(uuid())
   email              String              @unique
@@ -122,6 +170,11 @@ model User {
   financialTransactions FinancialTransaction[] @relation("FinancialTransactionRecordedBy")
   clientDebtTransactions ClientDebtTransaction[] @relation("ClientDebtRecordedBy")
   productPurchasePriceChanges ProductPurchasePriceHistory[]
+  journalsCreated             Journal[]
+  operatingExpenses           OperatingExpense[]
+  ownerWithdrawals            OwnerWithdrawal[]
+  purchasePayments            PurchasePayment[]
+  cargoPayments               CargoPayment[]
 
   @@index([role])
 }
@@ -183,6 +236,7 @@ model Supplier {
   updatedAt   DateTime   @updatedAt
   purchases        Purchase[]
   purchaseReceipts PurchaseReceipt[]
+  supplierPayables SupplierPayable[]
 
   @@index([name])
   @@index([isActive])
@@ -211,6 +265,10 @@ model Purchase {
   estimatedTotalLandedCostKgs   Decimal       @default(0) @db.Decimal(14, 2)
   averageLogisticsCostPerKg     Decimal       @default(0) @db.Decimal(14, 4)
 
+  paidAmountKgs                 Decimal       @default(0) @db.Decimal(14, 2)
+  unpaidAmountKgs               Decimal       @default(0) @db.Decimal(14, 2)
+  payableStatus                 PayableStatus @default(UNPAID)
+
   purchaseDate                  DateTime?     @db.Date
 
   createdAt                     DateTime      @default(now())
@@ -220,8 +278,12 @@ model Purchase {
   logistics                     PurchaseLogisticsExpense[]
   receipts                      PurchaseReceipt[]
   priceHistory                  ProductPurchasePriceHistory[]
+  supplierPayables              SupplierPayable[]
+  cargoPayables                 CargoPayable[]
+  purchasePayments              PurchasePayment[]
 
   @@index([status])
+  @@index([payableStatus])
   @@index([supplierId])
   @@index([createdAt])
   @@index([purchaseDate])
@@ -565,15 +627,25 @@ model PaymentAccount {
   paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id])
   name            String
   isActive        Boolean  @default(true)
+  isCompanyAccount Boolean @default(false)
+  chartAccountId  String?
+  chartAccount    ChartAccount? @relation(fields: [chartAccountId], references: [id])
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   payments        Payment[]
   transactions    FinancialTransaction[]
+  journalLines    JournalLine[]
+  operatingExpenses OperatingExpense[]
+  ownerWithdrawals  OwnerWithdrawal[]
+  purchasePayments  PurchasePayment[]
+  cargoPayments     CargoPayment[]
 
   @@unique([userId, paymentMethodId])
   @@index([userId])
   @@index([paymentMethodId])
   @@index([isActive])
+  @@index([isCompanyAccount])
+  @@index([chartAccountId])
 }
 
 model Payment {
@@ -694,4 +766,226 @@ model SaleReturnItem {
 
   @@index([returnId])
   @@index([productId])
+}
+
+model ChartAccount {
+  id        String           @id @default(uuid())
+  code      String           @unique
+  name      String
+  type      ChartAccountType
+  isActive  Boolean          @default(true)
+  sortOrder Int              @default(0)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  lines     JournalLine[]
+  paymentAccounts PaymentAccount[]
+  operatingExpenses OperatingExpense[]
+
+  @@index([type])
+  @@index([isActive])
+  @@index([sortOrder])
+}
+
+model AccountingPeriod {
+  id       String                  @id @default(uuid())
+  name     String
+  startsOn DateTime                @db.Date
+  endsOn   DateTime                @db.Date
+  status   AccountingPeriodStatus  @default(OPEN)
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+  journals Journal[]
+
+  @@index([status])
+  @@index([startsOn, endsOn])
+}
+
+model Journal {
+  id                   String                @id @default(uuid())
+  number               String                @unique
+  status               JournalStatus         @default(POSTED)
+  sourceType           AccountingSourceType
+  sourceId             String
+  memo                 String?
+  periodId             String?
+  period               AccountingPeriod?     @relation(fields: [periodId], references: [id])
+  createdByUserId      String
+  createdBy            User                  @relation(fields: [createdByUserId], references: [id])
+  postedAt             DateTime              @default(now())
+  createdAt            DateTime              @default(now())
+  reversesJournalId    String?               @unique
+  reversesJournal      Journal?              @relation("JournalReversal", fields: [reversesJournalId], references: [id])
+  reversedBy           Journal?              @relation("JournalReversal")
+  lines                JournalLine[]
+  operatingExpense     OperatingExpense?
+  ownerWithdrawal      OwnerWithdrawal?
+  purchasePayment      PurchasePayment?
+  cargoPayment         CargoPayment?
+  supplierPayable      SupplierPayable?
+  cargoPayable         CargoPayable?
+
+  @@index([status])
+  @@index([sourceType, sourceId])
+  @@index([createdByUserId])
+  @@index([postedAt])
+  @@index([periodId])
+}
+
+model JournalLine {
+  id               String          @id @default(uuid())
+  journalId        String
+  journal          Journal         @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  accountId        String
+  account          ChartAccount    @relation(fields: [accountId], references: [id])
+  debitKgs         Decimal         @default(0) @db.Decimal(14, 2)
+  creditKgs        Decimal         @default(0) @db.Decimal(14, 2)
+  memo             String?
+  paymentAccountId String?
+  paymentAccount   PaymentAccount? @relation(fields: [paymentAccountId], references: [id])
+  sortOrder        Int             @default(0)
+
+  @@index([journalId])
+  @@index([accountId])
+  @@index([paymentAccountId])
+}
+
+model CargoVendor {
+  id        String         @id @default(uuid())
+  name      String
+  phone     String?
+  notes     String?
+  isActive  Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  payables  CargoPayable[]
+
+  @@index([name])
+  @@index([isActive])
+}
+
+model SupplierPayable {
+  id                String        @id @default(uuid())
+  supplierId        String
+  supplier          Supplier      @relation(fields: [supplierId], references: [id])
+  purchaseId        String
+  purchase          Purchase      @relation(fields: [purchaseId], references: [id])
+  invoiceRef        String?
+  amountKgs         Decimal       @db.Decimal(14, 2)
+  paidAmountKgs     Decimal       @default(0) @db.Decimal(14, 2)
+  remainingAmountKgs Decimal      @db.Decimal(14, 2)
+  dueDate           DateTime?     @db.Date
+  status            PayableStatus @default(UNPAID)
+  journalId         String?       @unique
+  journal           Journal?      @relation(fields: [journalId], references: [id])
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@unique([purchaseId])
+  @@index([supplierId])
+  @@index([status])
+}
+
+model CargoPayable {
+  id                 String        @id @default(uuid())
+  cargoVendorId      String?
+  cargoVendor        CargoVendor?  @relation(fields: [cargoVendorId], references: [id])
+  purchaseId         String
+  purchase           Purchase      @relation(fields: [purchaseId], references: [id])
+  billRef            String?
+  amountKgs          Decimal       @db.Decimal(14, 2)
+  currency           Currency      @default(KGS)
+  paidAmountKgs      Decimal       @default(0) @db.Decimal(14, 2)
+  remainingAmountKgs Decimal       @db.Decimal(14, 2)
+  dueDate            DateTime?     @db.Date
+  status             PayableStatus @default(UNPAID)
+  journalId          String?       @unique
+  journal            Journal?      @relation(fields: [journalId], references: [id])
+  payments           CargoPayment[]
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([cargoVendorId])
+  @@index([purchaseId])
+  @@index([status])
+}
+
+model PurchasePayment {
+  id               String         @id @default(uuid())
+  purchaseId       String
+  purchase         Purchase       @relation(fields: [purchaseId], references: [id])
+  amountKgs        Decimal        @db.Decimal(14, 2)
+  paidAt           DateTime
+  paymentAccountId String
+  paymentAccount   PaymentAccount @relation(fields: [paymentAccountId], references: [id])
+  journalId        String         @unique
+  journal          Journal        @relation(fields: [journalId], references: [id])
+  createdByUserId  String
+  createdBy        User           @relation(fields: [createdByUserId], references: [id])
+  note             String?
+  createdAt        DateTime       @default(now())
+
+  @@index([purchaseId])
+  @@index([paidAt])
+  @@index([paymentAccountId])
+}
+
+model CargoPayment {
+  id               String         @id @default(uuid())
+  cargoPayableId   String
+  cargoPayable     CargoPayable   @relation(fields: [cargoPayableId], references: [id])
+  amountKgs        Decimal        @db.Decimal(14, 2)
+  paidAt           DateTime
+  paymentAccountId String
+  paymentAccount   PaymentAccount @relation(fields: [paymentAccountId], references: [id])
+  journalId        String         @unique
+  journal          Journal        @relation(fields: [journalId], references: [id])
+  createdByUserId  String
+  createdBy        User           @relation(fields: [createdByUserId], references: [id])
+  note             String?
+  createdAt        DateTime       @default(now())
+
+  @@index([cargoPayableId])
+  @@index([paidAt])
+}
+
+model OperatingExpense {
+  id               String                    @id @default(uuid())
+  expenseDate      DateTime                  @db.Date
+  category         OperatingExpenseCategory
+  amountKgs        Decimal                   @db.Decimal(14, 2)
+  currency         Currency                  @default(KGS)
+  accountId        String
+  account          ChartAccount              @relation(fields: [accountId], references: [id])
+  paymentAccountId String
+  paymentAccount   PaymentAccount            @relation(fields: [paymentAccountId], references: [id])
+  description      String
+  reference        String?
+  journalId        String                    @unique
+  journal          Journal                   @relation(fields: [journalId], references: [id])
+  createdByUserId  String
+  createdBy        User                      @relation(fields: [createdByUserId], references: [id])
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  @@index([expenseDate])
+  @@index([category])
+  @@index([accountId])
+  @@index([paymentAccountId])
+}
+
+model OwnerWithdrawal {
+  id               String         @id @default(uuid())
+  withdrawnAt      DateTime       @db.Date
+  amountKgs        Decimal        @db.Decimal(14, 2)
+  paymentAccountId String
+  paymentAccount   PaymentAccount @relation(fields: [paymentAccountId], references: [id])
+  description      String?
+  journalId        String         @unique
+  journal          Journal        @relation(fields: [journalId], references: [id])
+  createdByUserId  String
+  createdBy        User           @relation(fields: [createdByUserId], references: [id])
+  createdAt        DateTime       @default(now())
+
+  @@index([withdrawnAt])
+  @@index([paymentAccountId])
 }

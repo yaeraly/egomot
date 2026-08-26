@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { publicDecimal } from '../common/decimal.util';
 import { dec, roundMoney } from '../purchases/purchase-calc';
+import { COMPANY_PAYMENT_METHOD_CODES } from '../accounting/accounting-codes';
 
 @Injectable()
 export class FinanceBalanceService {
@@ -9,7 +10,10 @@ export class FinanceBalanceService {
 
   async listPaymentMethods(activeOnly = true) {
     return this.prisma.paymentMethod.findMany({
-      where: activeOnly ? { isActive: true } : undefined,
+      where: {
+        ...(activeOnly ? { isActive: true } : {}),
+        NOT: { code: { in: [...COMPANY_PAYMENT_METHOD_CODES] } },
+      },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
   }
@@ -74,7 +78,10 @@ export class FinanceSettingsService {
 
   async ensureUserAccounts(userId: string, userName: string) {
     const methods = await this.prisma.paymentMethod.findMany({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        NOT: { code: { in: [...COMPANY_PAYMENT_METHOD_CODES] } },
+      },
     });
     for (const method of methods) {
       await this.prisma.paymentAccount.upsert({
