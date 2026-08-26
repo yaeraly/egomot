@@ -3,8 +3,12 @@ import {
   OPERATIONAL_WALLET_STATED_KGS,
 } from './accounting-codes';
 import {
+  BACKFILL_STATUS,
+  HISTORICAL_OPENING_INVENTORY_BLOCKER,
+  computeInventoryIdentity,
   evaluateBackfillStatus,
   formatHistoricalBackfillReport,
+  isBackfillApplyAllowed,
   planHistoricalBackfill,
   parseBackfillArgs,
   purchaseRecognitionAmounts,
@@ -265,5 +269,195 @@ describe('historical finance backfill', () => {
     expect(parseBackfillArgs(['--sales']).mode).toBe('sales');
     expect(parseBackfillArgs(['--all']).mode).toBe('all');
     expect(parseBackfillArgs([]).mode).toBe('all');
+  });
+
+  function liveDryRunLikeSnapshot(
+    overrides: Partial<HistoricalBackfillSnapshot> = {},
+  ): HistoricalBackfillSnapshot {
+    return {
+      sales: [
+        {
+          id: 'sale-live',
+          number: 'S-LIVE',
+          status: 'CONFIRMED',
+          totalAmountKgs: '9167215.00',
+          paidAmountKgs: '9167215.00',
+          debtAmountKgs: '0.00',
+          saleDate: new Date('2026-01-10T00:00:00Z'),
+          isWalkIn: true,
+          items: [{ quantity: '1', unitCostKgs: '6609212.38' }],
+          payments: [
+            {
+              id: 'pay-live',
+              amountKgs: '9167215.00',
+              paymentMethodCode: 'CASH',
+              isDebtCollection: false,
+            },
+          ],
+          alreadyPosted: posted(),
+        },
+      ],
+      purchases: [
+        {
+          id: 'pur-live',
+          number: 'ZG-LIVE',
+          status: 'RECEIVED',
+          supplierId: 'sup-1',
+          estimatedTotalLandedCostKgs: '8501338.88',
+          totalCargoKgs: '1497220.72',
+          purchaseDate: new Date('2026-01-01T00:00:00Z'),
+          completedReceipts: [
+            {
+              id: 'rcpt-live',
+              totalLandedCostKgs: '8501338.88',
+              cargoKgs: '1497220.72',
+              alreadyPostedReceipt: false,
+            },
+          ],
+          purchasePayments: [],
+          cargoPayments: [],
+          alreadyPosted: purchasePosted(),
+        },
+      ],
+      openingCapitalPostedKgs: OPENING_INVESTOR_CAPITAL_KGS,
+      operationalWalletComputedKgs: OPERATIONAL_WALLET_STATED_KGS,
+      operationalInventoryKgs: '1902228.30',
+      operationalArKgs: '0.00',
+      postedGlInventoryKgs: '0.00',
+      purchaseItemCount: '7',
+      ...overrides,
+    };
+  }
+
+  it('1. reports a historical opening inventory gap from live dry-run totals', () => {
+    const identity = computeInventoryIdentity({
+      historicalPurchasesKgs: '8501338.88',
+      historicalCogsKgs: '6609212.38',
+      operationalInventoryKgs: '1902228.30',
+    });
+    expect(identity.assumedOpeningInventoryKgs).toBe('0.00');
+    expect(identity.expectedEndingInventoryKgs).toBe('1892126.50');
+    expect(identity.openingInventoryAdjustmentRequiredKgs).toBe('10101.80');
+    expect(identity.inventoryDifferenceKgs).toBe('-10101.80');
+    expect(identity.hasHistoricalOpeningInventoryGap).toBe(true);
+
+    const plan = planHistoricalBackfill(liveDryRunLikeSnapshot(), 'all');
+    expect(plan.totals.openingInventoryAdjustmentRequiredKgs).toBe('10101.80');
+    expect(evaluateBackfillStatus(plan, 'all').status).toBe(
+      HISTORICAL_OPENING_INVENTORY_BLOCKER,
+    );
+    const report = formatHistoricalBackfillReport(plan, 'all');
+    expect(report).toContain('Opening inventory adjustment required:');
+    expect(report).toContain('10101.80');
+    expect(report).toContain(HISTORICAL_OPENING_INVENTORY_BLOCKER);
+  });
+
+  it('2. purchase + COGS identity is opening 0 + landed - COGS', () => {
+    const identity = computeInventoryIdentity({
+      historicalPurchasesKgs: '20000.00',
+      historicalCogsKgs: '11000.00',
+      operationalInventoryKgs: '9000.00',
+    });
+    expect(identity.historicalPurchasesKgs).toBe('20000.00');
+    expect(identity.historicalCogsKgs).toBe('11000.00');
+    expect(identity.expectedEndingInventoryKgs).toBe('9000.00');
+    expect(identity.inventoryDifferenceKgs).toBe('0.00');
+    expect(identity.hasHistoricalOpeningInventoryGap).toBe(false);
+  });
+
+  it('3. current operational inventory reconciles when it equals purchases minus COGS', () => {
+    const snapshot: HistoricalBackfillSnapshot = {
+      sales: [walkInCashSale(), creditSale()],
+      purchases: [unpaidPurchase('RECEIVED')],
+      operationalInventoryKgs: '9000.00',
+      operationalArKgs: '8000.00',
+      postedGlInventoryKgs: '0.00',
+    };
+    const plan = planHistoricalBackfill(snapshot, 'all');
+    expect(plan.totals.operationalInventoryKgs).toBe('9000.00');
+    expect(plan.totals.expectedEndingInventoryKgs).toBe('9000.00');
+    expect(plan.totals.glInventoryKgs).toBe('9000.00');
+    expect(plan.totals.inventoryDifferenceKgs).toBe('0.00');
+    expect(plan.totals.postedGlInventoryKgs).toBe('0.00');
+    expect(evaluateBackfillStatus(plan, 'all').status).toBe(BACKFILL_STATUS.PASS);
+    expect(isBackfillApplyAllowed(evaluateBackfillStatus(plan, 'all'), false)).toBe(true);
+  });
+
+  it('4. does not invent a fake cash journal to close the wallet gap', () => {
+    const plan = planHistoricalBackfill(liveDryRunLikeSnapshot(), 'all');
+    expect(plan.planned.some((row) => row.sourceType === 'OPENING_BALANCE')).toBe(false);
+    expect(
+      plan.planned.filter((row) =>
+        row.lines.some(
+          (line) =>
+            (line.accountCode === ACCOUNT_CODE.CASH ||
+              line.accountCode === ACCOUNT_CODE.BANK) &&
+            roundMoney(line.creditKgs).gt(0),
+        ),
+      ),
+    ).toHaveLength(0);
+    expect(plan.totals.verifiedCashOutKgs).toBe('0.00');
+    expect(plan.totals.openingVsWalletGapKgs).toBe('-6582503.00');
+    expect(plan.totals.accountingCashKgs).not.toBe(OPERATIONAL_WALLET_STATED_KGS);
+    expect(plan.totals.cashReconciliationGapKgs).not.toBe('0.00');
+    const report = formatHistoricalBackfillReport(plan, 'all');
+    expect(report).toContain('No fake Dr/Cr Cash journal');
+  });
+
+  it('5. does not invent a fake supplier payment', () => {
+    const plan = planHistoricalBackfill(liveDryRunLikeSnapshot(), 'all');
+    expect(plan.planned.some((row) => row.sourceType === 'PURCHASE_PAYMENT')).toBe(false);
+    expect(plan.totals.verifiedSupplierPaymentsKgs).toBe('0.00');
+    expect(plan.totals.supplierApKgs).toBe('7004118.16');
+  });
+
+  it('6. does not invent a fake cargo payment', () => {
+    const plan = planHistoricalBackfill(liveDryRunLikeSnapshot(), 'all');
+    expect(plan.planned.some((row) => row.sourceType === 'CARGO_PAYMENT')).toBe(false);
+    expect(plan.totals.verifiedCargoPaymentsKgs).toBe('0.00');
+    expect(plan.totals.cargoApKgs).toBe('1497220.72');
+  });
+
+  it('7. dry-run blocks when inventory does not reconcile and refuses posting', () => {
+    const plan = planHistoricalBackfill(liveDryRunLikeSnapshot(), 'all');
+    const evaluation = evaluateBackfillStatus(plan, 'all');
+    expect(evaluation.status).toBe(HISTORICAL_OPENING_INVENTORY_BLOCKER);
+    expect(roundMoney(plan.totals.inventoryDifferenceKgs).eq(0)).toBe(false);
+    expect(isBackfillApplyAllowed(evaluation, true)).toBe(false);
+    expect(isBackfillApplyAllowed(evaluation, false)).toBe(false);
+    const report = formatHistoricalBackfillReport(plan, 'all');
+    expect(report).toContain('Apply allowed (difference == 0 and status PASS): NO');
+    expect(report).toContain('Difference:');
+    expect(report).toContain('-10101.80');
+  });
+
+  it('8. is idempotent: already posted journals stay skipped and still do not post when blocked', () => {
+    const snapshot = liveDryRunLikeSnapshot();
+    snapshot.sales[0].alreadyPosted = { ...posted(), liveSale: true, revenue: true, cogs: true };
+    snapshot.purchases[0].alreadyPosted = {
+      ...purchasePosted(),
+      purchase: true,
+      cargo: true,
+    };
+    const first = planHistoricalBackfill(snapshot, 'all');
+    const second = planHistoricalBackfill(snapshot, 'all');
+    expect(first.planned).toHaveLength(0);
+    expect(second.planned).toHaveLength(0);
+    expect(first.skipped.length).toBe(second.skipped.length);
+    expect(first.totals.openingInventoryAdjustmentRequiredKgs).toBe(
+      second.totals.openingInventoryAdjustmentRequiredKgs,
+    );
+    expect(evaluateBackfillStatus(first, 'all').status).toBe(
+      HISTORICAL_OPENING_INVENTORY_BLOCKER,
+    );
+    expect(isBackfillApplyAllowed(evaluateBackfillStatus(second, 'all'), false)).toBe(
+      false,
+    );
+  });
+
+  it('does not treat a cash gap as permission to post when inventory is open', () => {
+    const plan = planHistoricalBackfill(liveDryRunLikeSnapshot(), 'all');
+    expect(plan.totals.openingInvestorCapitalKgs).toBe(OPENING_INVESTOR_CAPITAL_KGS);
+    expect(evaluateBackfillStatus(plan, 'all').status).not.toBe(BACKFILL_STATUS.PASS);
   });
 });

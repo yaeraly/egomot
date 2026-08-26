@@ -2,7 +2,8 @@
  * Historical finance backfill into Journal / JournalLine.
  *
  * Does not modify Sales, Purchases, or Inventory records.
- * Does not invent purchase/cargo payments.
+ * Does not post when projected Inventory 1200 != SUM(Inventory.totalValueKgs).
+ * Does not invent opening inventory, supplier AP, cash, or cargo payments.
  * Does not post opening investor capital.
  * Does not convert the 9,167,215 operational wallet into company cash.
  *
@@ -23,7 +24,7 @@ async function main() {
   try {
     const result = await runHistoricalBackfill(prisma, process.argv.slice(2));
     console.log(result.report);
-    if (!result.dryRun && result.status === 'BLOCKED') {
+    if (!result.dryRun && result.status !== 'PASS') {
       process.exitCode = 1;
     }
   } finally {

@@ -1,6 +1,7 @@
 import {
   AccountingSourceType,
   ClientDebtTransactionType,
+  InventoryMovementType,
   PayableStatus,
   PrismaClient,
   PurchaseReceiptStatus,
@@ -9,6 +10,7 @@ import {
 import { publicDecimal } from '../common/decimal.util';
 import { moneyStr, roundMoney, dec } from '../purchases/purchase-calc';
 import {
+  ACCOUNT_CODE,
   OPENING_INVESTOR_CAPITAL_SOURCE_ID,
   UNSPECIFIED_CARGO_VENDOR_NAME,
 } from './accounting-codes';
@@ -17,7 +19,9 @@ import {
   planHistoricalBackfill,
   formatHistoricalBackfillReport,
   evaluateBackfillStatus,
+  isBackfillApplyAllowed,
   purchaseRecognitionAmounts,
+  type BackfillEvaluationStatus,
   type BackfillPurchaseInput,
   type BackfillSaleInput,
   type HistoricalBackfillSnapshot,
@@ -37,7 +41,7 @@ export type BackfillApplyResult = {
   created: number;
   skippedDuplicates: number;
   report: string;
-  status: 'PASS' | 'BLOCKED';
+  status: BackfillEvaluationStatus;
   dryRun: boolean;
 };
 
@@ -48,8 +52,19 @@ function key(sourceType: string, sourceId: string) {
 export async function loadHistoricalBackfillSnapshot(
   prisma: PrismaClient,
 ): Promise<HistoricalBackfillSnapshot> {
-  const [sales, purchases, journals, opening, walletSum, inventorySum, arSum] =
-    await Promise.all([
+  const [
+    sales,
+    purchases,
+    journals,
+    opening,
+    walletSum,
+    inventorySum,
+    arSum,
+    purchaseItemCount,
+    postedInventoryLines,
+    movementReceiptSum,
+    movementSaleSum,
+  ] = await Promise.all([
       prisma.sale.findMany({
         include: {
           client: true,
@@ -107,6 +122,22 @@ export async function loadHistoricalBackfillSnapshot(
       prisma.sale.aggregate({
         where: { status: { in: ['CONFIRMED', 'COMPLETED'] } },
         _sum: { debtAmountKgs: true },
+      }),
+      prisma.purchaseItem.count(),
+      prisma.journalLine.aggregate({
+        where: {
+          account: { code: ACCOUNT_CODE.INVENTORY },
+          journal: { status: JournalStatus.POSTED },
+        },
+        _sum: { debitKgs: true, creditKgs: true },
+      }),
+      prisma.inventoryMovement.aggregate({
+        where: { type: InventoryMovementType.PURCHASE_RECEIPT },
+        _sum: { totalCost: true },
+      }),
+      prisma.inventoryMovement.aggregate({
+        where: { type: InventoryMovementType.SALE },
+        _sum: { totalCost: true },
       }),
     ]);
 
@@ -212,6 +243,18 @@ export async function loadHistoricalBackfillSnapshot(
     openingCapitalPostedKgs = moneyStr(cash);
   }
 
+  const saleItemCount = saleInputs.reduce((sum, sale) => sum + sale.items.length, 0);
+  const saleQuantity = saleInputs.reduce(
+    (sum, sale) =>
+      sum.plus(
+        sale.items.reduce((itemSum, item) => itemSum.plus(dec(item.quantity)), dec(0)),
+      ),
+    dec(0),
+  );
+  const postedGlInventory = dec(postedInventoryLines._sum.debitKgs ?? 0).minus(
+    dec(postedInventoryLines._sum.creditKgs ?? 0),
+  );
+
   return {
     sales: saleInputs,
     purchases: purchaseInputs,
@@ -219,6 +262,13 @@ export async function loadHistoricalBackfillSnapshot(
     operationalWalletComputedKgs: moneyStr(walletSum._sum.amountKgs ?? 0),
     operationalInventoryKgs: moneyStr(inventorySum._sum.totalValueKgs ?? 0),
     operationalArKgs: moneyStr(arSum._sum.debtAmountKgs ?? 0),
+    postedGlInventoryKgs: moneyStr(postedGlInventory),
+    reliableOpeningInventoryKgs: null,
+    saleItemCount: String(saleItemCount),
+    saleQuantity: saleQuantity.toFixed(3),
+    purchaseItemCount: String(purchaseItemCount),
+    movementPurchaseReceiptValueKgs: moneyStr(movementReceiptSum._sum.totalCost ?? 0),
+    movementSaleValueKgs: moneyStr(movementSaleSum._sum.totalCost ?? 0),
   };
 }
 
@@ -378,10 +428,11 @@ export async function runHistoricalBackfill(
   const { selection, dryRun, mode } = parseBackfillArgs(argv);
   const snapshot = await loadHistoricalBackfillSnapshot(prisma);
   const plan = planHistoricalBackfill(snapshot, selection);
+  const evaluation = evaluateBackfillStatus(plan, mode);
   let created = 0;
   let skippedDuplicates = plan.totals.skippedCount;
 
-  if (!dryRun) {
+  if (isBackfillApplyAllowed(evaluation, dryRun)) {
     const owner = await prisma.user.findFirst({
       where: { role: 'OWNER', isActive: true },
       orderBy: { createdAt: 'asc' },
@@ -400,7 +451,6 @@ export async function runHistoricalBackfill(
     skippedDuplicates += applied.skippedDuplicates;
   }
 
-  const evaluation = evaluateBackfillStatus(plan, mode);
   const extra = [
     '',
     dryRun ? 'Dry run: no journals created.' : `Journals created: ${created}`,
@@ -409,9 +459,16 @@ export async function runHistoricalBackfill(
       ? `Opening capital journal found: ${snapshot.openingCapitalPostedKgs}`
       : 'Opening capital journal NOT found (not created by this command).',
     `Computed operational wallet: ${snapshot.operationalWalletComputedKgs}`,
+    `Posted GL Inventory 1200: ${snapshot.postedGlInventoryKgs}`,
+    `InventoryMovement PURCHASE_RECEIPT value: ${snapshot.movementPurchaseReceiptValueKgs}`,
+    `InventoryMovement SALE value: ${snapshot.movementSaleValueKgs}`,
     'Opening investor capital was not posted by this command.',
     'Purchase.status=PAID was not treated as cash evidence.',
     '9,167,215 operational wallet was not used as opening cash or a plug.',
+    'No fake cash, supplier payment, or cargo payment journals were invented.',
+    evaluation.status === 'PASS'
+      ? 'Inventory reconciles; posting is allowed when not a dry-run.'
+      : 'Do not post: inventory difference != 0 or another blocker is present.',
   ];
 
   return {

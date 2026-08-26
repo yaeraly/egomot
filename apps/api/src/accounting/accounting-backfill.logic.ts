@@ -1,5 +1,10 @@
 import { moneyStr, roundMoney, Decimal } from '../purchases/purchase-calc';
 import {
+  FINAL_EXPECTED_SALE_ITEMS,
+  FINAL_EXPECTED_TOTAL_AMOUNT_KGS,
+  FINAL_EXPECTED_TOTAL_QUANTITY,
+} from '../sales/historical-sales-import.logic';
+import {
   OPENING_INVESTOR_CAPITAL_KGS,
   OPERATIONAL_WALLET_STATED_KGS,
   glCashAccountCodeForPaymentMethod,
@@ -20,6 +25,18 @@ import {
   grossDebit,
   type JournalLineDraft,
 } from './accounting-journal.logic';
+
+export const BACKFILL_STATUS = {
+  PASS: 'PASS',
+  BLOCKED: 'BLOCKED',
+  BLOCKED_OPENING_INVENTORY: 'BLOCKED — HISTORICAL OPENING INVENTORY REQUIRED',
+} as const;
+
+export type BackfillEvaluationStatus =
+  (typeof BACKFILL_STATUS)[keyof typeof BACKFILL_STATUS];
+
+export const HISTORICAL_OPENING_INVENTORY_BLOCKER =
+  BACKFILL_STATUS.BLOCKED_OPENING_INVENTORY;
 
 export const BACKFILL_SALE_STATUSES = new Set(['CONFIRMED', 'COMPLETED']);
 
@@ -174,6 +191,18 @@ export type HistoricalBackfillSnapshot = {
   operationalWalletComputedKgs?: string | null;
   operationalInventoryKgs?: string | null;
   operationalArKgs?: string | null;
+  /** Posted GL 1200. Do not invent; usually 0 before historical journals exist. */
+  postedGlInventoryKgs?: string | null;
+  /**
+   * Reliable pre-period inventory value only. Leave null/undefined when unknown.
+   * Never invent supplier AP, cash, or purchase records to fund this.
+   */
+  reliableOpeningInventoryKgs?: string | null;
+  saleItemCount?: string | null;
+  saleQuantity?: string | null;
+  purchaseItemCount?: string | null;
+  movementPurchaseReceiptValueKgs?: string | null;
+  movementSaleValueKgs?: string | null;
 };
 
 export type HistoricalBackfillPlan = {
@@ -207,14 +236,44 @@ export type HistoricalBackfillTotals = {
   cashReconciliationGapKgs: string;
   operationalInventoryKgs: string;
   glInventoryKgs: string;
+  postedGlInventoryKgs: string;
+  plannedJournalInventoryKgs: string;
+  assumedOpeningInventoryKgs: string;
+  openingInventoryAdjustmentRequiredKgs: string;
+  expectedEndingInventoryKgs: string;
   inventoryDifferenceKgs: string;
+  movementPurchaseReceiptValueKgs: string;
+  movementSaleValueKgs: string;
+  movementDerivedEndingKgs: string;
+  saleItemCount: string;
+  saleQuantity: string;
+  purchaseItemCount: string;
+  importedSourceExpectedSaleItems: string;
+  importedSourceExpectedQuantity: string;
+  importedSourceExpectedRevenueKgs: string;
+  salesMatchImportedSource: boolean;
   operationalArKgs: string;
   glArKgs: string;
   arDifferenceKgs: string;
   totalApKgs: string;
+  openingVsWalletGapKgs: string;
   plannedJournalCount: number;
   skippedCount: number;
   inventedPaymentAttempts: number;
+};
+
+export type InventoryIdentity = {
+  assumedOpeningInventoryKgs: string;
+  historicalPurchasesKgs: string;
+  historicalCogsKgs: string;
+  expectedEndingInventoryKgs: string;
+  operationalInventoryKgs: string;
+  openingInventoryAdjustmentRequiredKgs: string;
+  inventoryDifferenceKgs: string;
+  hasHistoricalOpeningInventoryGap: boolean;
+  movementPurchaseReceiptValueKgs: string;
+  movementSaleValueKgs: string;
+  movementDerivedEndingKgs: string;
 };
 
 function zero(): Decimal {
@@ -279,6 +338,76 @@ export function verifiedCargoPaymentTotal(
 ): Decimal {
   return roundMoney(
     purchase.cargoPayments.reduce((sum, row) => sum.plus(roundMoney(row.amountKgs)), zero()),
+  );
+}
+
+/**
+ * Inventory identity for historical backfill.
+ *
+ * Opening (reliable source only, otherwise 0)
+ * + historical purchase landed cost
+ * - historical COGS
+ * = expected ending inventory
+ *
+ * Compare expected ending to SUM(Inventory.totalValueKgs).
+ * Do not invent opening inventory, supplier AP, cash, or purchases to close a gap.
+ */
+export function computeInventoryIdentity(params: {
+  historicalPurchasesKgs: Decimal.Value;
+  historicalCogsKgs: Decimal.Value;
+  operationalInventoryKgs: Decimal.Value;
+  reliableOpeningInventoryKgs?: Decimal.Value | null;
+  movementPurchaseReceiptValueKgs?: Decimal.Value | null;
+  movementSaleValueKgs?: Decimal.Value | null;
+}): InventoryIdentity {
+  const purchases = roundMoney(params.historicalPurchasesKgs);
+  const cogs = roundMoney(params.historicalCogsKgs);
+  const operational = roundMoney(params.operationalInventoryKgs);
+  const hasReliableOpening =
+    params.reliableOpeningInventoryKgs != null &&
+    String(params.reliableOpeningInventoryKgs).trim() !== '';
+  const assumedOpening = hasReliableOpening
+    ? roundMoney(params.reliableOpeningInventoryKgs as Decimal.Value)
+    : zero();
+  const expectedEnding = roundMoney(assumedOpening.plus(purchases).minus(cogs));
+  const difference = roundMoney(expectedEnding.minus(operational));
+  const openingAdj = roundMoney(operational.minus(expectedEnding));
+  const movementIn = roundMoney(params.movementPurchaseReceiptValueKgs ?? 0);
+  const movementOut = roundMoney(params.movementSaleValueKgs ?? 0);
+  const movementEnding = roundMoney(movementIn.minus(movementOut));
+
+  return {
+    assumedOpeningInventoryKgs: moneyStr(assumedOpening),
+    historicalPurchasesKgs: moneyStr(purchases),
+    historicalCogsKgs: moneyStr(cogs),
+    expectedEndingInventoryKgs: moneyStr(expectedEnding),
+    operationalInventoryKgs: moneyStr(operational),
+    openingInventoryAdjustmentRequiredKgs: moneyStr(openingAdj),
+    inventoryDifferenceKgs: moneyStr(difference),
+    hasHistoricalOpeningInventoryGap: !openingAdj.eq(0),
+    movementPurchaseReceiptValueKgs: moneyStr(movementIn),
+    movementSaleValueKgs: moneyStr(movementOut),
+    movementDerivedEndingKgs: moneyStr(movementEnding),
+  };
+}
+
+export function isBackfillApplyAllowed(
+  evaluation: { status: BackfillEvaluationStatus },
+  dryRun: boolean,
+): boolean {
+  return !dryRun && evaluation.status === BACKFILL_STATUS.PASS;
+}
+
+function sumSaleQuantity(sales: BackfillSaleInput[]): Decimal {
+  return sales.reduce(
+    (sum, sale) =>
+      sum.plus(
+        sale.items.reduce(
+          (itemSum, item) => itemSum.plus(new Decimal(item.quantity)),
+          new Decimal(0),
+        ),
+      ),
+    new Decimal(0),
   );
 }
 
@@ -592,13 +721,35 @@ export function summarizeBackfillPlan(params: {
     grossCredit(lines, '1000').plus(grossCredit(lines, '1010')),
   );
   const accountingCash = roundMoney(opening.plus(verifiedCashIn).minus(verifiedCashOut));
-  const glInventory = roundMoney(debitNormalBalance(lines, '1200'));
+  const plannedJournalInventory = roundMoney(debitNormalBalance(lines, '1200'));
+  const postedGlInventory = roundMoney(params.snapshot.postedGlInventoryKgs ?? 0);
   const glAr = roundMoney(debitNormalBalance(lines, '1100'));
   const operationalInventory = roundMoney(params.snapshot.operationalInventoryKgs ?? 0);
   const statedWallet = roundMoney(OPERATIONAL_WALLET_STATED_KGS);
   const computedWallet = roundMoney(
     params.snapshot.operationalWalletComputedKgs ?? OPERATIONAL_WALLET_STATED_KGS,
   );
+  const identity = computeInventoryIdentity({
+    historicalPurchasesKgs: inventoryIn,
+    historicalCogsKgs: cogs,
+    operationalInventoryKgs: operationalInventory,
+    reliableOpeningInventoryKgs: params.snapshot.reliableOpeningInventoryKgs,
+    movementPurchaseReceiptValueKgs: params.snapshot.movementPurchaseReceiptValueKgs,
+    movementSaleValueKgs: params.snapshot.movementSaleValueKgs,
+  });
+  const backfillableSaleItems = backfillableSales.flatMap((sale) => sale.items);
+  const saleItemCount = params.snapshot.saleItemCount
+    ? String(params.snapshot.saleItemCount)
+    : String(backfillableSaleItems.length);
+  const saleQuantity = params.snapshot.saleQuantity
+    ? String(params.snapshot.saleQuantity)
+    : sumSaleQuantity(backfillableSales).toFixed(3);
+  const purchaseItemCount = String(params.snapshot.purchaseItemCount ?? '0');
+  const importedRevenue = roundMoney(FINAL_EXPECTED_TOTAL_AMOUNT_KGS);
+  const salesMatchImportedSource =
+    Number(saleItemCount) === FINAL_EXPECTED_SALE_ITEMS &&
+    new Decimal(saleQuantity).eq(new Decimal(FINAL_EXPECTED_TOTAL_QUANTITY)) &&
+    revenue.eq(importedRevenue);
 
   return {
     saleCount: String(backfillableSales.length),
@@ -622,9 +773,26 @@ export function summarizeBackfillPlan(params: {
     operationalWalletStatedKgs: moneyStr(statedWallet),
     operationalWalletComputedKgs: moneyStr(computedWallet),
     cashReconciliationGapKgs: moneyStr(accountingCash.minus(statedWallet)),
-    operationalInventoryKgs: moneyStr(operationalInventory),
-    glInventoryKgs: moneyStr(glInventory),
-    inventoryDifferenceKgs: moneyStr(glInventory.minus(operationalInventory)),
+    openingVsWalletGapKgs: moneyStr(opening.minus(statedWallet)),
+    operationalInventoryKgs: identity.operationalInventoryKgs,
+    glInventoryKgs: identity.expectedEndingInventoryKgs,
+    postedGlInventoryKgs: moneyStr(postedGlInventory),
+    plannedJournalInventoryKgs: moneyStr(plannedJournalInventory),
+    assumedOpeningInventoryKgs: identity.assumedOpeningInventoryKgs,
+    openingInventoryAdjustmentRequiredKgs:
+      identity.openingInventoryAdjustmentRequiredKgs,
+    expectedEndingInventoryKgs: identity.expectedEndingInventoryKgs,
+    inventoryDifferenceKgs: identity.inventoryDifferenceKgs,
+    movementPurchaseReceiptValueKgs: identity.movementPurchaseReceiptValueKgs,
+    movementSaleValueKgs: identity.movementSaleValueKgs,
+    movementDerivedEndingKgs: identity.movementDerivedEndingKgs,
+    saleItemCount,
+    saleQuantity,
+    purchaseItemCount,
+    importedSourceExpectedSaleItems: String(FINAL_EXPECTED_SALE_ITEMS),
+    importedSourceExpectedQuantity: FINAL_EXPECTED_TOTAL_QUANTITY,
+    importedSourceExpectedRevenueKgs: moneyStr(importedRevenue),
+    salesMatchImportedSource,
     operationalArKgs: moneyStr(operationalAr),
     glArKgs: moneyStr(glAr),
     arDifferenceKgs: moneyStr(glAr.minus(operationalAr)),
@@ -639,7 +807,7 @@ export function evaluateBackfillStatus(
   plan: HistoricalBackfillPlan,
   mode: BackfillMode | BackfillSelection = 'all',
 ): {
-  status: 'PASS' | 'BLOCKED';
+  status: BackfillEvaluationStatus;
   blockers: string[];
 } {
   const blockers: string[] = [];
@@ -649,11 +817,19 @@ export function evaluateBackfillStatus(
   }
   const selection = selectionFromMode(mode);
   const fullInventoryRecon = selection.sales && selection.purchases && selection.cargo;
+  let openingInventoryGap = false;
   if (fullInventoryRecon) {
     if (!roundMoney(t.inventoryDifferenceKgs).eq(0)) {
-      blockers.push(
-        `Inventory GL ${t.glInventoryKgs} != operational ${t.operationalInventoryKgs} (difference ${t.inventoryDifferenceKgs})`,
-      );
+      openingInventoryGap = !roundMoney(t.openingInventoryAdjustmentRequiredKgs).eq(0);
+      if (openingInventoryGap) {
+        blockers.push(
+          `${HISTORICAL_OPENING_INVENTORY_BLOCKER}: opening inventory adjustment required ${t.openingInventoryAdjustmentRequiredKgs} KGS. No supplier payable, cash payment, or purchase records invented.`,
+        );
+      } else {
+        blockers.push(
+          `Inventory projected GL ${t.glInventoryKgs} != operational ${t.operationalInventoryKgs} (difference ${t.inventoryDifferenceKgs})`,
+        );
+      }
     }
   }
   if (selection.sales && selection.payments) {
@@ -663,10 +839,17 @@ export function evaluateBackfillStatus(
       );
     }
   }
-  return {
-    status: blockers.length === 0 ? 'PASS' : 'BLOCKED',
-    blockers,
-  };
+  const openingGapIsOnlyBlocker =
+    openingInventoryGap &&
+    blockers.length === 1 &&
+    blockers[0].startsWith(HISTORICAL_OPENING_INVENTORY_BLOCKER);
+  let status: BackfillEvaluationStatus = BACKFILL_STATUS.PASS;
+  if (openingGapIsOnlyBlocker) {
+    status = BACKFILL_STATUS.BLOCKED_OPENING_INVENTORY;
+  } else if (blockers.length > 0) {
+    status = BACKFILL_STATUS.BLOCKED;
+  }
+  return { status, blockers };
 }
 
 export function formatHistoricalBackfillReport(
@@ -675,13 +858,20 @@ export function formatHistoricalBackfillReport(
 ): string {
   const t = plan.totals;
   const evaluation = evaluateBackfillStatus(plan, mode);
+  const applyAllowed = isBackfillApplyAllowed(evaluation, false);
   const lines = [
     '=== HISTORICAL FINANCE BACKFILL ===',
     '',
-    'Sales:',
+    '=== SALES VALIDATION ===',
     '',
-    'Source sales:',
+    'Sale count:',
     t.saleCount,
+    '',
+    'Sale item count:',
+    t.saleItemCount,
+    '',
+    'Total quantity:',
+    t.saleQuantity,
     '',
     'Revenue:',
     t.revenueKgs,
@@ -692,26 +882,89 @@ export function formatHistoricalBackfillReport(
     'Credit sales:',
     t.creditSalesKgs,
     '',
-    'AR:',
-    t.arBookedKgs,
-    '',
     'COGS:',
     t.cogsKgs,
     '',
+    'Imported source expected items / quantity / revenue:',
+    `${t.importedSourceExpectedSaleItems} / ${t.importedSourceExpectedQuantity} / ${t.importedSourceExpectedRevenueKgs}`,
     '',
-    'Purchases:',
+    'Matches imported historical TSV totals:',
+    t.salesMatchImportedSource ? 'YES' : 'NO',
+    '',
+    'Sales were not modified.',
+    '',
+    '',
+    '=== PURCHASE VALIDATION ===',
     '',
     'Purchase count:',
     t.purchaseCount,
     '',
-    'Inventory value:',
+    'Purchase item count:',
+    t.purchaseItemCount,
+    '',
+    'Purchase landed cost:',
     t.inventoryInKgs,
     '',
-    'Verified supplier payments:',
-    t.verifiedSupplierPaymentsKgs,
+    'Cargo total:',
+    t.cargoTotalKgs,
     '',
-    'Supplier AP:',
+    'Supplier payable:',
     t.supplierApKgs,
+    '',
+    'Cargo payable:',
+    t.cargoApKgs,
+    '',
+    'Purchase.status=PAID was not treated as payment evidence.',
+    '',
+    '',
+    '=== INVENTORY IDENTITY ===',
+    '',
+    'Opening inventory adjustment required:',
+    t.openingInventoryAdjustmentRequiredKgs,
+    '',
+    'Historical purchases:',
+    t.inventoryInKgs,
+    '',
+    'Historical COGS:',
+    t.cogsKgs,
+    '',
+    'Expected ending inventory:',
+    t.expectedEndingInventoryKgs,
+    '',
+    'Operational inventory:',
+    t.operationalInventoryKgs,
+    '',
+    'Difference:',
+    t.inventoryDifferenceKgs,
+    '',
+    'Assumed opening inventory (reliable source only; otherwise 0):',
+    t.assumedOpeningInventoryKgs,
+    '',
+    'Posted GL Inventory 1200 (before this backfill):',
+    t.postedGlInventoryKgs,
+    '',
+    'Planned journal net Inventory 1200:',
+    t.plannedJournalInventoryKgs,
+    '',
+    'Projected GL Inventory 1200 (opening 0 + purchases - COGS):',
+    t.glInventoryKgs,
+    '',
+    'InventoryMovement PURCHASE_RECEIPT value:',
+    t.movementPurchaseReceiptValueKgs,
+    '',
+    'InventoryMovement SALE value:',
+    t.movementSaleValueKgs,
+    '',
+    'Movement-derived ending (receipts - sales):',
+    t.movementDerivedEndingKgs,
+    '',
+    'Root cause of previous GL Inventory = 0:',
+    'Account 1200 has no posted historical journals, so posted GL Inventory is 0.00.',
+    'The previous dry-run compared planned journal-line net 1200 (0 when journals are unposted/skipped) to SUM(Inventory.totalValueKgs).',
+    'Historical purchases and COGS already exist on operational Purchase/Sale tables and were never posted to GL.',
+    'Projected 1200 after purchase + COGS journals is purchases - COGS, not 0. That still must equal operational inventory before posting.',
+    'InventoryMovement types are only PURCHASE_RECEIPT and SALE; there is no reliable opening-inventory financing source.',
+    'No balancing plug, supplier payable, cash payment, or purchase record is invented for the residual.',
     '',
     '',
     'Cargo:',
@@ -743,20 +996,13 @@ export function formatHistoricalBackfillReport(
     'Operational wallet total:',
     t.operationalWalletStatedKgs,
     '',
-    'Cash reconciliation gap:',
+    'Cash reconciliation gap (projected accounting cash vs wallet):',
     t.cashReconciliationGapKgs,
     '',
+    'Opening capital vs operational wallet gap (not closed by a cash plug):',
+    t.openingVsWalletGapKgs,
     '',
-    'Inventory:',
-    '',
-    'Operational inventory:',
-    t.operationalInventoryKgs,
-    '',
-    'GL inventory:',
-    t.glInventoryKgs,
-    '',
-    'Difference:',
-    t.inventoryDifferenceKgs,
+    'No fake Dr/Cr Cash journal is created to force accounting cash to equal the operational wallet.',
     '',
     '',
     'AR:',
@@ -788,6 +1034,7 @@ export function formatHistoricalBackfillReport(
     `Skipped (already posted / not backfillable): ${t.skippedCount}`,
     `Purchase.status=PAID without payment documents (no cash out invented): ${t.inventedPaymentAttempts}`,
     `Purchases without completed receipt: ${t.purchasesWithoutReceiptCount}`,
+    `Apply allowed (difference == 0 and status PASS): ${applyAllowed ? 'YES' : 'NO'}`,
     '',
     'Status:',
     '',
