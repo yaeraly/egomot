@@ -20,7 +20,12 @@ export class FinanceBalanceService {
 
   async listUserPaymentAccounts(userId: string) {
     return this.prisma.paymentAccount.findMany({
-      where: { userId, isActive: true, paymentMethod: { isActive: true } },
+      where: {
+        userId,
+        isActive: true,
+        isCompanyAccount: false,
+        paymentMethod: { isActive: true },
+      },
       include: { paymentMethod: true },
       orderBy: [{ paymentMethod: { sortOrder: 'asc' } }],
     });
@@ -61,6 +66,7 @@ export class FinanceBalanceService {
         id: paymentAccountId,
         userId,
         isActive: true,
+        isCompanyAccount: false,
         paymentMethod: { isActive: true },
       },
       include: { paymentMethod: true },

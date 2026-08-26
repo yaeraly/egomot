@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { UserRole } from '@prisma/client';
 import type { User } from '@prisma/client';
@@ -6,6 +6,7 @@ import { CurrentUser } from '../common/current-user.decorator';
 import { Roles } from '../common/roles.decorator';
 import { RolesGuard } from '../common/roles.guard';
 import { AccountingDocumentsService } from './accounting-documents.service';
+import { AccountingReportsService } from './accounting-reports.service';
 import { AccountingService } from './accounting.service';
 import {
   CreateCargoPaymentDto,
@@ -22,6 +23,7 @@ export class AccountingController {
   constructor(
     private readonly accounting: AccountingService,
     private readonly documents: AccountingDocumentsService,
+    private readonly reports: AccountingReportsService,
   ) {}
 
   @Get('accounts')
@@ -30,6 +32,7 @@ export class AccountingController {
   }
 
   @Get('company-accounts')
+  @Roles(UserRole.OWNER, UserRole.WAREHOUSE)
   listCompanyAccounts() {
     return this.accounting.listCompanyPaymentAccounts();
   }
@@ -83,6 +86,11 @@ export class AccountingController {
     return this.documents.recordPurchasePayment(user.id, purchaseId, dto);
   }
 
+  @Post('purchase-payments/:id/cancel')
+  cancelPurchasePayment(@CurrentUser() user: User, @Param('id') id: string) {
+    return this.documents.cancelPurchasePayment(user.id, id);
+  }
+
   @Post('cargo-payables/:id/payments')
   payCargo(
     @CurrentUser() user: User,
@@ -90,6 +98,11 @@ export class AccountingController {
     @Body() dto: CreateCargoPaymentDto,
   ) {
     return this.documents.recordCargoPayment(user.id, id, dto);
+  }
+
+  @Post('cargo-payments/:id/cancel')
+  cancelCargoPayment(@CurrentUser() user: User, @Param('id') id: string) {
+    return this.documents.cancelCargoPayment(user.id, id);
   }
 
   @Get('operating-expenses')
@@ -102,6 +115,11 @@ export class AccountingController {
     return this.documents.recordOperatingExpense(user.id, dto);
   }
 
+  @Post('operating-expenses/:id/cancel')
+  cancelExpense(@CurrentUser() user: User, @Param('id') id: string) {
+    return this.documents.cancelOperatingExpense(user.id, id);
+  }
+
   @Get('owner-withdrawals')
   listWithdrawals() {
     return this.documents.listOwnerWithdrawals();
@@ -110,5 +128,69 @@ export class AccountingController {
   @Post('owner-withdrawals')
   createWithdrawal(@CurrentUser() user: User, @Body() dto: CreateOwnerWithdrawalDto) {
     return this.documents.recordOwnerWithdrawal(user.id, dto);
+  }
+
+  @Post('owner-withdrawals/:id/cancel')
+  cancelWithdrawal(@CurrentUser() user: User, @Param('id') id: string) {
+    return this.documents.cancelOwnerWithdrawal(user.id, id);
+  }
+
+  @Get('dashboard')
+  financeDashboard(
+    @Query('preset') preset?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.reports.dashboard({
+      preset: preset ?? (from && to ? 'custom' : 'month'),
+      from,
+      to,
+    });
+  }
+
+  @Get('reports/cash-flow')
+  cashFlow(
+    @Query('preset') preset?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('groupBy') groupBy?: string,
+  ) {
+    return this.reports.cashFlow({
+      preset: preset ?? (from && to ? 'custom' : 'month'),
+      from,
+      to,
+      groupBy,
+    });
+  }
+
+  @Get('reports/profit-loss')
+  profitAndLoss(
+    @Query('preset') preset?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.reports.profitAndLoss({
+      preset: preset ?? (from && to ? 'custom' : 'month'),
+      from,
+      to,
+    });
+  }
+
+  @Get('reports/balance-sheet')
+  balanceSheet(
+    @Query('preset') preset?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.reports.balanceSheet({
+      preset: preset ?? (from && to ? 'custom' : 'month'),
+      from,
+      to,
+    });
+  }
+
+  @Get('reports/inventory-valuation')
+  inventoryValuation() {
+    return this.reports.inventoryValuation();
   }
 }

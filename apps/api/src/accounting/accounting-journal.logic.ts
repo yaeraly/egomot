@@ -171,12 +171,16 @@ export function buildPartialPurchaseLines(params: {
 /**
  * Recognize landed inventory on a completed receipt.
  * Cargo is capitalized into inventory and credited to cargo AP when unpaid.
- * Supplier portion (goods + non-cargo transport) credits supplier AP.
- * Cash is never credited here — that would invent a payment.
+ * Supplier portion (goods + non-cargo transport) is split:
+ *   paidSupplierKgs credits Cash/Bank (only when an actual payment amount is provided)
+ *   remainder credits supplier AP.
+ * paidSupplierKgs defaults to 0 — never invent a historical payment.
  */
 export function buildPurchaseReceiptLines(params: {
   inventoryKgs: Decimal.Value;
   cargoKgs?: Decimal.Value;
+  paidSupplierKgs?: Decimal.Value;
+  cashAccountCode?: AccountCode;
 }): JournalLineDraft[] {
   const inventory = requirePositive(params.inventoryKgs, 'Receipt inventory');
   const cargo = roundMoney(params.cargoKgs ?? 0);
@@ -184,11 +188,20 @@ export function buildPurchaseReceiptLines(params: {
     throw new InvalidJournalLineError('Cargo amount is out of range for landed inventory');
   }
   const supplierPortion = roundMoney(inventory.minus(cargo));
+  const paid = roundMoney(params.paidSupplierKgs ?? 0);
+  if (paid.lt(0) || paid.gt(supplierPortion)) {
+    throw new InvalidJournalLineError('Receipt supplier paid amount is out of range');
+  }
+  const unpaid = roundMoney(supplierPortion.minus(paid));
+  const cashCode = params.cashAccountCode ?? ACCOUNT_CODE.CASH;
   const lines: JournalLineDraft[] = [
     line(ACCOUNT_CODE.INVENTORY, inventory, 0, 'Purchase receipt landed cost'),
   ];
-  if (supplierPortion.gt(0)) {
-    lines.push(line(ACCOUNT_CODE.SUPPLIER_AP, 0, supplierPortion, 'Supplier payable'));
+  if (paid.gt(0)) {
+    lines.push(line(cashCode, 0, paid, 'Purchase cash'));
+  }
+  if (unpaid.gt(0)) {
+    lines.push(line(ACCOUNT_CODE.SUPPLIER_AP, 0, unpaid, 'Supplier payable'));
   }
   if (cargo.gt(0)) {
     lines.push(line(ACCOUNT_CODE.CARGO_AP, 0, cargo, 'Cargo payable'));

@@ -17,6 +17,7 @@ import {
   OPENING_INVESTOR_CAPITAL_KGS,
   OPENING_INVESTOR_CAPITAL_SOURCE_ID,
   glCashAccountCodeForPaymentMethod,
+  type AccountCode,
 } from './accounting-codes';
 import {
   InvalidJournalLineError,
@@ -121,25 +122,29 @@ export class AccountingService {
     );
   }
 
-  async voidAndReverse(journalId: string, createdByUserId: string) {
-    const original = await this.prisma.journal.findUnique({
-      where: { id: journalId },
-      include: { lines: { include: { account: true }, orderBy: { sortOrder: 'asc' } } },
-    });
-    if (!original) throw new NotFoundException('Journal not found');
-    if (original.status === JournalStatus.VOIDED) {
-      throw new BadRequestException('Journal is already voided');
-    }
+  async voidAndReverse(
+    journalId: string,
+    createdByUserId: string,
+    db: AccountingClient = this.prisma,
+  ) {
+    const run = async (tx: AccountingClient) => {
+      const original = await tx.journal.findUnique({
+        where: { id: journalId },
+        include: { lines: { include: { account: true }, orderBy: { sortOrder: 'asc' } } },
+      });
+      if (!original) throw new NotFoundException('Journal not found');
+      if (original.status === JournalStatus.VOIDED) {
+        throw new BadRequestException('Journal is already voided');
+      }
 
-    const drafts: JournalLineDraft[] = original.lines.map((row) => ({
-      accountCode: row.account.code,
-      debitKgs: moneyStr(row.debitKgs),
-      creditKgs: moneyStr(row.creditKgs),
-      memo: row.memo ?? undefined,
-      paymentAccountId: row.paymentAccountId,
-    }));
+      const drafts: JournalLineDraft[] = original.lines.map((row) => ({
+        accountCode: row.account.code,
+        debitKgs: moneyStr(row.debitKgs),
+        creditKgs: moneyStr(row.creditKgs),
+        memo: row.memo ?? undefined,
+        paymentAccountId: row.paymentAccountId,
+      }));
 
-    return this.prisma.$transaction(async (tx) => {
       const reversal = await this.postJournal(
         {
           sourceType: AccountingSourceType.REVERSAL,
@@ -156,7 +161,12 @@ export class AccountingService {
         data: { status: JournalStatus.VOIDED },
       });
       return reversal;
-    });
+    };
+
+    if (db === this.prisma) {
+      return this.prisma.$transaction(async (tx) => run(tx));
+    }
+    return run(db);
   }
 
   async postConfirmedSale(
@@ -242,6 +252,8 @@ export class AccountingService {
       createdByUserId: string;
       postedAt?: Date;
       cargoVendorId?: string | null;
+      paidSupplierKgs?: Prisma.Decimal | string;
+      cashAccountCode?: string;
     },
   ) {
     const inventory = roundMoney(params.inventoryKgs);
@@ -258,11 +270,18 @@ export class AccountingService {
     });
 
     const cargo = roundMoney(params.cargoKgs);
+    const paidSupplier = roundMoney(params.paidSupplierKgs ?? 0);
     const supplierPortion = remainingPayableAmount(inventory, cargo);
-    const lines = buildPurchaseReceiptLines({
-      inventoryKgs: inventory,
-      cargoKgs: cargo,
-    });
+    const unpaidSupplier = remainingPayableAmount(supplierPortion, paidSupplier);
+    const lines = await this.tagCompanyCashLines(
+      db,
+      buildPurchaseReceiptLines({
+        inventoryKgs: inventory,
+        cargoKgs: cargo,
+        paidSupplierKgs: paidSupplier,
+        cashAccountCode: (params.cashAccountCode as AccountCode | undefined) ?? ACCOUNT_CODE.CASH,
+      }),
+    );
 
     const journal = await this.postJournal(
       {
@@ -286,13 +305,15 @@ export class AccountingService {
       });
       if (existing) {
         const amount = roundMoney(dec(existing.amountKgs).plus(supplierPortion));
-        const remaining = remainingPayableAmount(amount, existing.paidAmountKgs);
+        const paid = roundMoney(dec(existing.paidAmountKgs).plus(paidSupplier));
+        const remaining = remainingPayableAmount(amount, paid);
         await db.supplierPayable.update({
           where: { id: existing.id },
           data: {
             amountKgs: moneyStr(amount),
+            paidAmountKgs: moneyStr(paid),
             remainingAmountKgs: moneyStr(remaining),
-            status: payableStatusFromAmounts(amount, existing.paidAmountKgs) as PayableStatus,
+            status: payableStatusFromAmounts(amount, paid) as PayableStatus,
           },
         });
       } else {
@@ -301,9 +322,9 @@ export class AccountingService {
             supplierId: params.supplierId,
             purchaseId: params.purchaseId,
             amountKgs: moneyStr(supplierPortion),
-            paidAmountKgs: '0.00',
-            remainingAmountKgs: moneyStr(supplierPortion),
-            status: PayableStatus.UNPAID,
+            paidAmountKgs: moneyStr(paidSupplier),
+            remainingAmountKgs: moneyStr(unpaidSupplier),
+            status: payableStatusFromAmounts(supplierPortion, paidSupplier) as PayableStatus,
             journalId: journal.id,
           },
         });

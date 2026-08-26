@@ -17,7 +17,10 @@ export default function SalesBalancePage() {
 
   return (
     <div>
-      <PageHeader title="Мой баланс" subtitle="По платёжным счетам" />
+      <PageHeader
+        title="Мой баланс"
+        subtitle="Личный кассовый остаток сотрудника. Это не касса компании."
+      />
       <Card className="mb-4">
         <p className="text-sm text-muted">Общий баланс</p>
         <p className="text-2xl font-bold">{money(balance.totalBalanceKgs)}</p>

@@ -7,7 +7,9 @@ import { randomUUID } from 'crypto';
 import {
   AccountingSourceType,
   Currency,
+  JournalStatus,
   PayableStatus,
+  SaleStatus,
 } from '@prisma/client';
 import { publicDecimal } from '../common/decimal.util';
 import { parseBusinessDate } from '../common/date.util';
@@ -182,6 +184,36 @@ export class AccountingDocumentsService {
     });
   }
 
+  async cancelPurchasePayment(userId: string, paymentId: string) {
+    const payment = await this.prisma.purchasePayment.findUnique({
+      where: { id: paymentId },
+      include: { journal: true, purchase: { include: { supplierPayables: true } } },
+    });
+    if (!payment) throw new NotFoundException('Purchase payment not found');
+    if (payment.journal.status === JournalStatus.VOIDED) {
+      throw new BadRequestException('Purchase payment is already reversed');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const reversal = await this.accounting.voidAndReverse(payment.journalId, userId, tx);
+      const payable = payment.purchase.supplierPayables[0];
+      if (payable) {
+        const newPaid = remainingPayableAmount(payable.paidAmountKgs, payment.amountKgs);
+        const remaining = remainingPayableAmount(payable.amountKgs, newPaid);
+        await tx.supplierPayable.update({
+          where: { id: payable.id },
+          data: {
+            paidAmountKgs: moneyStr(newPaid),
+            remainingAmountKgs: moneyStr(remaining),
+            status: payableStatusFromAmounts(payable.amountKgs, newPaid) as PayableStatus,
+          },
+        });
+        await this.accounting.syncPurchaseSettlement(tx, payment.purchaseId);
+      }
+      return reversal;
+    });
+  }
+
   async recordCargoPayment(userId: string, cargoPayableId: string, dto: CreateCargoPaymentDto) {
     const amount = roundMoney(dto.amountKgs);
     if (!amount.gt(0)) {
@@ -250,6 +282,34 @@ export class AccountingDocumentsService {
         where: { id: payment.id },
         include: { journal: { include: { lines: { include: { account: true } } } } },
       });
+    });
+  }
+
+  async cancelCargoPayment(userId: string, paymentId: string) {
+    const payment = await this.prisma.cargoPayment.findUnique({
+      where: { id: paymentId },
+      include: { journal: true, cargoPayable: true },
+    });
+    if (!payment) throw new NotFoundException('Cargo payment not found');
+    if (payment.journal.status === JournalStatus.VOIDED) {
+      throw new BadRequestException('Cargo payment is already reversed');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const reversal = await this.accounting.voidAndReverse(payment.journalId, userId, tx);
+      const payable = payment.cargoPayable;
+      const newPaid = remainingPayableAmount(payable.paidAmountKgs, payment.amountKgs);
+      const remaining = remainingPayableAmount(payable.amountKgs, newPaid);
+      await tx.cargoPayable.update({
+        where: { id: payable.id },
+        data: {
+          paidAmountKgs: moneyStr(newPaid),
+          remainingAmountKgs: moneyStr(remaining),
+          status: payableStatusFromAmounts(payable.amountKgs, newPaid) as PayableStatus,
+        },
+      });
+      await this.accounting.syncPurchaseSettlement(tx, payable.purchaseId);
+      return reversal;
     });
   }
 
@@ -330,6 +390,7 @@ export class AccountingDocumentsService {
 
   async listOperatingExpenses() {
     const rows = await this.prisma.operatingExpense.findMany({
+      where: { journal: { status: JournalStatus.POSTED } },
       include: {
         account: true,
         paymentAccount: { include: { paymentMethod: true } },
@@ -412,6 +473,7 @@ export class AccountingDocumentsService {
 
   async listOwnerWithdrawals() {
     const rows = await this.prisma.ownerWithdrawal.findMany({
+      where: { journal: { status: JournalStatus.POSTED } },
       include: {
         paymentAccount: { include: { paymentMethod: true } },
         createdBy: { select: { id: true, name: true } },
@@ -429,9 +491,30 @@ export class AccountingDocumentsService {
     }));
   }
 
+  async cancelOperatingExpense(userId: string, id: string) {
+    const expense = await this.prisma.operatingExpense.findUnique({
+      where: { id },
+      include: { journal: true },
+    });
+    if (!expense) throw new NotFoundException('Operating expense not found');
+    return this.accounting.voidAndReverse(expense.journalId, userId);
+  }
+
+  async cancelOwnerWithdrawal(userId: string, id: string) {
+    const withdrawal = await this.prisma.ownerWithdrawal.findUnique({
+      where: { id },
+      include: { journal: true },
+    });
+    if (!withdrawal) throw new NotFoundException('Owner withdrawal not found');
+    return this.accounting.voidAndReverse(withdrawal.journalId, userId);
+  }
+
   async listOpenCustomerDebt() {
     const sales = await this.prisma.sale.findMany({
-      where: { debtAmountKgs: { gt: 0 } },
+      where: {
+        debtAmountKgs: { gt: 0 },
+        status: { in: [SaleStatus.CONFIRMED, SaleStatus.COMPLETED] },
+      },
       include: { client: true },
       orderBy: { saleDate: 'desc' },
     });
@@ -443,6 +526,9 @@ export class AccountingDocumentsService {
         saleNumber: row.number,
         clientId: row.clientId,
         clientName: row.client.name,
+        originalAmountKgs: publicDecimal(row.totalAmountKgs),
+        paidAmountKgs: publicDecimal(row.paidAmountKgs),
+        remainingKgs: publicDecimal(row.debtAmountKgs),
         debtAmountKgs: publicDecimal(row.debtAmountKgs),
         saleDate: row.saleDate.toISOString(),
       })),

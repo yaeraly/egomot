@@ -26,7 +26,16 @@ const WAREHOUSE_NAV = [
   { href: '/warehouse/inventory-count', label: 'Инвентаризация' },
 ];
 
-const FINANCE_NAV = [{ href: '/finance/accounts', label: 'Счета' }];
+const FINANCE_NAV = [
+  { href: '/finance', label: 'Обзор' },
+  { href: '/finance/cash-flow', label: 'ДДС' },
+  { href: '/finance/profit-loss', label: 'ОПУ' },
+  { href: '/finance/balance-sheet', label: 'Баланс' },
+  { href: '/finance/debts', label: 'Долги' },
+  { href: '/finance/inventory', label: 'Остатки' },
+  { href: '/finance/expenses', label: 'Расходы' },
+  { href: '/finance/accounts', label: 'Счета' },
+];
 
 function HomeIcon() {
   return (
@@ -153,7 +162,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const settingsNav = isOwner ? NAV.slice(7) : [];
   const showWarehouse = isOwner || isWarehouse;
-  const showSalesBalance = isOwner || isSales;
+  const showSalesBalance = isSales;
 
   const nav = (
     <nav className="flex flex-col gap-1">
@@ -193,7 +202,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {isOwner ? (
         <div className="mt-1">
           <Link
-            href="/finance/accounts"
+            href="/finance"
             className={cn(
               'flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm font-medium',
               financeOpen ? 'bg-brand text-white' : 'text-slate-300 hover:bg-white/10 hover:text-white',
@@ -205,7 +214,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {financeOpen ? (
             <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-3">
               {FINANCE_NAV.map((item) => {
-                const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                const active =
+                  item.href === '/finance'
+                    ? pathname === '/finance'
+                    : pathname === item.href || pathname.startsWith(`${item.href}/`);
                 return (
                   <Link
                     key={item.href}

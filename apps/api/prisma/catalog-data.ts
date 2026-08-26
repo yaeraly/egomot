@@ -116,6 +116,6 @@ export const CATALOG_PRODUCTS: CatalogProductRow[] = [
   { code: 'PRD-0083', name: 'Переднее крыло 3.00-3.50-12', category: 'Колёса', weightKg: '0.400', purchasePriceCny: '6.00' },
   { code: 'PRD-0084', name: 'Переднее крыло 3.75-4.00-12', category: 'Колёса', weightKg: '0.450', purchasePriceCny: '6.00' },
   { code: 'PRD-0085', name: 'Переднее крыло 4.50-5.00-12', category: 'Колёса', weightKg: '0.500', purchasePriceCny: '14.00' },
-  { code: 'PRD-0086', name: 'Рычаг повышенной/пониженной передачи', category: 'Органы управления', weightKg: '0.250', purchasePriceCny: '10.000' },
-  { code: 'PRD-0087', name: 'Рулевая колонка', category: 'Органы управления', weightKg: '3.400', purchasePriceCny: '83.000' },
+  { code: 'PRD-0086', name: 'Рычаг повышенной/пониженной передачи', category: 'Органы управления', weightKg: '0.250', purchasePriceCny: '10.00' },
+  { code: 'PRD-0087', name: 'Рулевая колонка', category: 'Органы управления', weightKg: '3.400', purchasePriceCny: '83.00' },
 ];

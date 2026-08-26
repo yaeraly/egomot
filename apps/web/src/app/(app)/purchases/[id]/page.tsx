@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { formatDate, formatBusinessDate } from '@/lib/format';
+import { formatDate, formatBusinessDate, money } from '@/lib/format';
 import { AuditLog, Purchase, PurchaseStatus, STATUS_LABELS } from '@/lib/types';
 import { Badge, Button, Card, PageHeader, Select } from '@/components/ui';
 import { PurchaseSummary } from '@/components/PurchaseSummary';
@@ -84,6 +84,26 @@ export default function PurchaseViewPage() {
           productName: item.product?.name,
         }))}
       />
+      <Card className="grid gap-2 sm:grid-cols-2">
+        <p className="sm:col-span-2 font-semibold">Оплата поставщику</p>
+        <p>Итого: {money(purchase.estimatedTotalLandedCostKgs, 'KGS')}</p>
+        <p>Оплачено: {money(purchase.paidAmountKgs ?? '0', 'KGS')}</p>
+        <p>Остаток долга: {money(purchase.unpaidAmountKgs ?? '0', 'KGS')}</p>
+        <p>
+          Статус:{' '}
+          <Badge
+            tone={
+              purchase.payableStatus === 'PAID'
+                ? 'green'
+                : purchase.payableStatus === 'PARTIAL'
+                  ? 'amber'
+                  : 'red'
+            }
+          >
+            {purchase.payableStatus ?? 'UNPAID'}
+          </Badge>
+        </p>
+      </Card>
 
       <Card className="space-y-3">
         <p className="font-semibold">Статус</p>

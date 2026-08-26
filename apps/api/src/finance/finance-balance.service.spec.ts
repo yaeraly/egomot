@@ -46,6 +46,14 @@ describe('FinanceBalanceService', () => {
       .mockResolvedValueOnce({ _sum: { amountKgs: '82500' } });
 
     const balance = await service.getEmployeeBalance('user-1');
+    expect(prisma.paymentAccount.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: 'user-1',
+          isCompanyAccount: false,
+        }),
+      }),
+    );
     expect(balance.accounts).toHaveLength(2);
     expect(balance.accounts[0].balanceKgs).toBe('35000');
     expect(balance.accounts[1].balanceKgs).toBe('82500');
@@ -59,6 +67,15 @@ describe('FinanceBalanceService', () => {
       paymentMethod: { code: 'CASH', name: 'Наличные' },
     });
     const account = await service.resolvePaymentAccount('user-1', 'acc-1');
+    expect(prisma.paymentAccount.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'acc-1',
+          userId: 'user-1',
+          isCompanyAccount: false,
+        }),
+      }),
+    );
     expect(account.id).toBe('acc-1');
   });
 });

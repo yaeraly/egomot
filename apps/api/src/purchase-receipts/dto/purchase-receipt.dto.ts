@@ -73,6 +73,14 @@ export class CompletePurchaseReceiptDto {
   @ValidateNested({ each: true })
   @Type(() => ReceiptItemCommentDto)
   discrepancyComments?: ReceiptItemCommentDto[];
+
+  @IsOptional()
+  @IsNumberString()
+  supplierPaidKgs?: string;
+
+  @IsOptional()
+  @IsUUID()
+  paymentAccountId?: string;
 }
 
 export class ReceiptItemCommentDto {

@@ -141,6 +141,9 @@ export interface Purchase {
   totalLogisticsKgs: string;
   estimatedTotalLandedCostKgs: string;
   averageLogisticsCostPerKg: string;
+  paidAmountKgs?: string;
+  unpaidAmountKgs?: string;
+  payableStatus?: 'UNPAID' | 'PARTIAL' | 'PAID';
   items?: PurchaseItem[];
   logistics?: PurchaseLogistics[];
   createdAt: string;
@@ -235,6 +238,23 @@ export interface SalesReport {
     saleCount: number;
   };
   months: SalesReportMonthRow[];
+}
+
+export interface FinanceDashboard {
+  range: { from: string; to: string; preset?: string };
+  companyCashKgs: string;
+  companyBankKgs: string;
+  investorCapitalKgs: string;
+  inventoryValueKgs: string;
+  accountsReceivableKgs: string;
+  supplierDebtKgs: string;
+  cargoDebtKgs: string;
+  salesRevenueKgs: string;
+  cogsKgs: string;
+  grossProfitKgs: string;
+  operatingExpensesKgs: string;
+  netProfitKgs: string;
+  balanceDifferenceKgs: string;
 }
 
 export interface DashboardSummary {
@@ -374,6 +394,12 @@ export const STATUS_LABELS: Record<PurchaseStatus, string> = {
   ARRIVED: 'Прибыло',
   RECEIVED: 'Принято',
   RECEIVED_WITH_DISCREPANCY: 'Принято с расхождением',
+};
+
+export const PAYABLE_STATUS_LABELS: Record<'UNPAID' | 'PARTIAL' | 'PAID', string> = {
+  UNPAID: 'UNPAID',
+  PARTIAL: 'PARTIAL',
+  PAID: 'PAID',
 };
 
 export const RECEIPT_STATUS_LABELS: Record<PurchaseReceiptStatus, string> = {

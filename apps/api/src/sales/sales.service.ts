@@ -5,10 +5,12 @@ import {
 } from '@nestjs/common';
 import type { User } from '@prisma/client';
 import {
+  AccountingSourceType,
   ClientDebtTransactionType,
   FinancialTransactionType,
   InventoryMovementType,
   InventoryReferenceType,
+  JournalStatus,
   Prisma,
   SalePaymentStatus,
   SaleReturnStatus,
@@ -24,6 +26,7 @@ import { ClientCategoryService } from '../pricing/client-category.service';
 import { FinanceBalanceService } from '../finance/finance-balance.service';
 import { AccountingService } from '../accounting/accounting.service';
 import { ClientDebtService } from './client-debt.service';
+import { rebuildInventorySkippingCancelledDocuments } from '../inventory/rebuild-inventory-from-ledger';
 import {
   SaleReceiptService,
   WhatsAppService,
@@ -892,6 +895,73 @@ export class SalesService {
 
       return this.serializeReturn(saleReturn);
     });
+  }
+
+  async cancel(user: User, saleId: string) {
+    const sale = await this.prisma.sale.findUnique({
+      where: { id: saleId },
+      include: { items: true, payments: true },
+    });
+    if (!sale) throw new NotFoundException('Продажа не найдена');
+    if (sale.status === SaleStatus.CANCELLED) {
+      return this.get(saleId);
+    }
+
+    const saved = await this.prisma.$transaction(async (tx) => {
+      if (sale.status === SaleStatus.CONFIRMED || sale.status === SaleStatus.COMPLETED) {
+        const paymentIds = sale.payments.map((row) => row.id);
+        const journals = await tx.journal.findMany({
+          where: {
+            status: JournalStatus.POSTED,
+            OR: [
+              { sourceType: AccountingSourceType.SALE, sourceId: sale.id },
+              ...(paymentIds.length
+                ? [
+                    {
+                      sourceType: AccountingSourceType.SALE_DEBT_PAYMENT,
+                      sourceId: { in: paymentIds },
+                    },
+                  ]
+                : []),
+            ],
+          },
+        });
+        for (const journal of journals) {
+          await this.accounting.voidAndReverse(journal.id, user.id, tx);
+        }
+      }
+
+      const updated = await tx.sale.update({
+        where: { id: saleId },
+        data: {
+          status: SaleStatus.CANCELLED,
+          debtAmountKgs: '0.00',
+        },
+        include: this.saleInclude,
+      });
+
+      if (sale.status === SaleStatus.CONFIRMED || sale.status === SaleStatus.COMPLETED) {
+        await rebuildInventorySkippingCancelledDocuments(
+          tx,
+          sale.items.map((item) => item.productId),
+        );
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          action: SALE_AUDIT_ACTIONS.SALE_CANCELLED,
+          entityType: 'Sale',
+          entityId: saleId,
+          oldValue: { status: sale.status },
+          newValue: { status: SaleStatus.CANCELLED },
+        },
+      });
+
+      return updated;
+    });
+
+    return this.serializeSale(saved);
   }
 
   private async nextSaleNumber(tx: Prisma.TransactionClient): Promise<string> {

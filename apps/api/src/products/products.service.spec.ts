@@ -120,12 +120,12 @@ describe('ProductsService', () => {
 
 describe('catalog seed data', () => {
   it('10. has expected catalog categories', () => {
-    expect(CATALOG_CATEGORY_NAMES).toHaveLength(20);
-    expect(new Set(CATALOG_CATEGORY_NAMES).size).toBe(20);
+    expect(CATALOG_CATEGORY_NAMES).toHaveLength(21);
+    expect(new Set(CATALOG_CATEGORY_NAMES).size).toBe(21);
   });
 
   it('11. has expected catalog products', () => {
-    expect(CATALOG_PRODUCTS.length).toBeGreaterThanOrEqual(81);
+    expect(CATALOG_PRODUCTS).toHaveLength(87);
     const names = new Set(CATALOG_PRODUCTS.map((row) => row.name));
     expect(names.size).toBe(CATALOG_PRODUCTS.length);
     const codes = new Set(CATALOG_PRODUCTS.map((row) => row.code));

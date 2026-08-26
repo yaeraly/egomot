@@ -5,8 +5,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AccountingSourceType,
   InventoryReferenceType,
   InventoryMovementType,
+  JournalStatus,
+  PayableStatus,
   Prisma,
   PurchaseReceiptStatus,
   PurchaseStatus,
@@ -23,7 +26,10 @@ import {
 } from '../common/date.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountingService } from '../accounting/accounting.service';
-import { UNSPECIFIED_CARGO_VENDOR_NAME } from '../accounting/accounting-codes';
+import { ACCOUNT_CODE, UNSPECIFIED_CARGO_VENDOR_NAME } from '../accounting/accounting-codes';
+import { remainingPayableAmount } from '../accounting/accounting-journal.logic';
+import { rebuildInventorySkippingCancelledDocuments } from '../inventory/rebuild-inventory-from-ledger';
+import { dec, roundMoney } from '../purchases/purchase-calc';
 import {
   calculateReceipt,
   computeInventoryAfterReceipt,
@@ -780,6 +786,29 @@ export class PurchaseReceiptsService {
       const cargoVendor = await tx.cargoVendor.findFirst({
         where: { name: UNSPECIFIED_CARGO_VENDOR_NAME, isActive: true },
       });
+      const paidSupplier = roundMoney(dto.supplierPaidKgs ?? 0);
+      const supplierPortion = remainingPayableAmount(
+        calc.totals.totalLandedCostKgs,
+        calc.totals.cargoKgs,
+      );
+      if (paidSupplier.gt(supplierPortion)) {
+        throw new BadRequestException(
+          'Оплата поставщику не может превышать стоимость товара без карго',
+        );
+      }
+      let cashAccountCode: string = ACCOUNT_CODE.CASH;
+      if (paidSupplier.gt(0)) {
+        if (!dto.paymentAccountId) {
+          throw new BadRequestException(
+            'Укажите кассу или банк компании для оплаты поставщику при приходе',
+          );
+        }
+        const account = await this.accounting.requireCompanyPaymentAccount(
+          dto.paymentAccountId,
+          tx,
+        );
+        cashAccountCode = this.accounting.cashAccountCodeForCompanyAccount(account);
+      }
       await this.accounting.postPurchaseReceipt(tx, {
         receiptId: id,
         purchaseId: receipt.purchaseId,
@@ -789,6 +818,8 @@ export class PurchaseReceiptsService {
         createdByUserId: user.id,
         postedAt: receipt.warehouseReceiptDate,
         cargoVendorId: cargoVendor?.id ?? null,
+        paidSupplierKgs: paidSupplier,
+        cashAccountCode,
       });
 
       const done = await tx.purchaseReceipt.update({
@@ -832,21 +863,63 @@ export class PurchaseReceiptsService {
   async cancel(user: User, id: string) {
     const receipt = await this.prisma.purchaseReceipt.findUnique({
       where: { id },
+      include: { items: true, purchase: true },
     });
     if (!receipt) throw new NotFoundException('Приход не найден');
-    if (receipt.status === PurchaseReceiptStatus.COMPLETED) {
-      throw new BadRequestException('Завершённый приход нельзя отменить');
-    }
     if (receipt.status === PurchaseReceiptStatus.CANCELLED) {
       return this.get(id);
     }
 
     const saved = await this.prisma.$transaction(async (tx) => {
+      if (receipt.status === PurchaseReceiptStatus.COMPLETED) {
+        const laterPayments = await tx.purchasePayment.count({
+          where: { purchaseId: receipt.purchaseId },
+        });
+        const laterCargoPayments = await tx.cargoPayment.count({
+          where: { cargoPayable: { purchaseId: receipt.purchaseId } },
+        });
+        if (laterPayments > 0 || laterCargoPayments > 0) {
+          throw new BadRequestException(
+            'Нельзя отменить приход после отдельных оплат поставщику или карго. Сначала сторнируйте оплаты.',
+          );
+        }
+
+        const journal = await tx.journal.findFirst({
+          where: {
+            sourceType: AccountingSourceType.PURCHASE_RECEIPT,
+            sourceId: id,
+            status: JournalStatus.POSTED,
+          },
+        });
+        if (journal) {
+          await this.accounting.voidAndReverse(journal.id, user.id, tx);
+        }
+
+        await tx.supplierPayable.deleteMany({ where: { purchaseId: receipt.purchaseId } });
+        await tx.cargoPayable.deleteMany({ where: { purchaseId: receipt.purchaseId } });
+        await tx.purchase.update({
+          where: { id: receipt.purchaseId },
+          data: {
+            status: PurchaseStatus.ARRIVED,
+            paidAmountKgs: '0.00',
+            unpaidAmountKgs: moneyStrFromPurchase(receipt.purchase.estimatedTotalLandedCostKgs),
+            payableStatus: PayableStatus.UNPAID,
+          },
+        });
+      }
+
       const updated = await tx.purchaseReceipt.update({
         where: { id },
         data: { status: PurchaseReceiptStatus.CANCELLED },
         include: this.include(),
       });
+
+      if (receipt.status === PurchaseReceiptStatus.COMPLETED) {
+        await rebuildInventorySkippingCancelledDocuments(
+          tx,
+          receipt.items.map((item) => item.productId),
+        );
+      }
 
       await tx.auditLog.create({
         data: {
@@ -864,6 +937,10 @@ export class PurchaseReceiptsService {
 
     return this.serializeReceipt(saved);
   }
+}
+
+function moneyStrFromPurchase(value: Prisma.Decimal | string | number) {
+  return roundMoney(dec(value)).toFixed(2);
 }
 
 function rowIdForProduct(

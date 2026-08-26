@@ -86,6 +86,12 @@ export class SalesController {
     return this.sales.updateSaleItemPrice(user, id, itemId, dto);
   }
 
+  @Post(':id/cancel')
+  @Roles(UserRole.OWNER)
+  cancel(@CurrentUser() user: User, @Param('id') id: string) {
+    return this.sales.cancel(user, id);
+  }
+
   @Post(':id/returns')
   @Roles(UserRole.OWNER)
   createReturn(@Param('id') id: string, @Body() dto: CreateSaleReturnDto) {

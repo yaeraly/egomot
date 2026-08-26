@@ -4,8 +4,10 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { money } from '@/lib/format';
-import { DashboardSummary, STATUS_LABELS, PurchaseStatus } from '@/lib/types';
+import { useAuth } from '@/lib/auth';
+import { DashboardSummary, FinanceDashboard, STATUS_LABELS, PurchaseStatus } from '@/lib/types';
 import { Badge, Card, PageHeader } from '@/components/ui';
+import { FinanceDashboardCards } from '@/components/FinanceDashboardCards';
 
 const STATUS_TONE: Record<PurchaseStatus, 'slate' | 'teal' | 'amber' | 'green' | 'blue'> = {
   DRAFT: 'slate',
@@ -20,15 +22,48 @@ const STATUS_TONE: Record<PurchaseStatus, 'slate' | 'teal' | 'amber' | 'green' |
 };
 
 export default function DashboardPage() {
+  const { user } = useAuth();
+  const isOwner = user?.role === 'OWNER';
   const [data, setData] = useState<DashboardSummary | null>(null);
+  const [finance, setFinance] = useState<FinanceDashboard | null>(null);
 
   useEffect(() => {
     void api<DashboardSummary>('/dashboard/summary').then(setData);
   }, []);
 
+  useEffect(() => {
+    if (!isOwner) return;
+    void api<FinanceDashboard>('/accounting/dashboard?preset=month')
+      .then(setFinance)
+      .catch(() => setFinance(null));
+  }, [isOwner]);
+
   return (
     <div>
       <PageHeader title="Dashboard" subtitle="Обзор товаров, поставщиков и закупок из Китая" />
+
+      {isOwner ? (
+        <section className="mb-8 space-y-3">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">Финансы компании</h2>
+              <p className="text-sm text-muted">
+                Остатки по плану счетов, не по кошелькам сотрудников
+              </p>
+            </div>
+            <Link href="/finance" className="text-sm font-semibold text-brand">
+              Открыть финансы
+            </Link>
+          </div>
+          <FinanceDashboardCards data={finance} />
+          {finance ? (
+            <p className="text-sm text-muted">
+              Assets − (Liabilities + Equity) = {money(finance.balanceDifferenceKgs, 'KGS')}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Stat href="/products" label="Товары" value={data?.products ?? '—'} />
         <Stat href="/suppliers" label="Поставщики" value={data?.suppliers ?? '—'} />

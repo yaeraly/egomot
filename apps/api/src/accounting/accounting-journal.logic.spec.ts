@@ -75,6 +75,20 @@ describe('accounting journal foundation', () => {
     expect(payableStatusFromAmounts('10000', '4000')).toBe('PARTIAL');
   });
 
+  it('4b. paid-at-receipt purchase: Dr Inventory / Cr Cash / Cr Supplier AP / Cr Cargo AP', () => {
+    const lines = buildPurchaseReceiptLines({
+      inventoryKgs: '500000',
+      cargoKgs: '100000',
+      paidSupplierKgs: '300000',
+    });
+    const { debitKgs, creditKgs } = totals(lines);
+    expect(moneyStr(debitKgs)).toBe(moneyStr(creditKgs));
+    expect(debitNormalBalance(lines, ACCOUNT_CODE.INVENTORY).toFixed(2)).toBe('500000.00');
+    expect(creditNormalBalance(lines, ACCOUNT_CODE.CASH).toFixed(2)).toBe('300000.00');
+    expect(creditNormalBalance(lines, ACCOUNT_CODE.SUPPLIER_AP).toFixed(2)).toBe('100000.00');
+    expect(creditNormalBalance(lines, ACCOUNT_CODE.CARGO_AP).toFixed(2)).toBe('100000.00');
+  });
+
   it('5. unpaid cargo is capitalized into inventory and credited to cargo AP', () => {
     const receipt = buildPurchaseReceiptLines({
       inventoryKgs: '18000.00',

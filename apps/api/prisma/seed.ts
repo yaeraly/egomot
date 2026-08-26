@@ -142,14 +142,29 @@ async function verifyCatalog() {
   const catalogCategoryCount = await prisma.category.count({
     where: { name: { in: [...CATALOG_CATEGORY_NAMES] } },
   });
-  const catalogProductCount = await prisma.product.count({
-    where: { code: { startsWith: 'PRD-' } },
-  });
   if (catalogCategoryCount !== CATALOG_CATEGORY_NAMES.length) {
     throw new Error(`Expected ${CATALOG_CATEGORY_NAMES.length} catalog categories, got ${catalogCategoryCount}`);
   }
-  if (catalogProductCount !== CATALOG_PRODUCTS.length) {
-    throw new Error(`Expected ${CATALOG_PRODUCTS.length} catalog products, got ${catalogProductCount}`);
+
+  const expectedCodes = CATALOG_PRODUCTS.map((row) => row.code);
+  const products = await prisma.product.findMany({
+    where: { code: { in: expectedCodes } },
+    select: { code: true, name: true },
+  });
+  const byCode = new Map(products.map((row) => [row.code, row]));
+  const missing = CATALOG_PRODUCTS.filter((row) => !byCode.has(row.code));
+  if (missing.length > 0) {
+    throw new Error(
+      `Expected ${CATALOG_PRODUCTS.length} catalog products, missing ${missing
+        .map((row) => row.code)
+        .join(', ')}`,
+    );
+  }
+  const mismatched = CATALOG_PRODUCTS.filter((row) => byCode.get(row.code)?.name !== row.name);
+  if (mismatched.length > 0) {
+    throw new Error(
+      `Catalog product name mismatch: ${mismatched.map((row) => row.code).join(', ')}`,
+    );
   }
 }
 

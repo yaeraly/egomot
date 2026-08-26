@@ -12,7 +12,7 @@ import {
   RECEIPT_STATUS_LABELS,
   ReceiptCalculationPreview,
 } from '@/lib/types';
-import { Badge, Button, Card, ErrorText, Field, Input, PageHeader, Textarea } from '@/components/ui';
+import { Badge, Button, Card, ErrorText, Field, Input, PageHeader, Select, Textarea } from '@/components/ui';
 
 function diffTone(value: string): 'slate' | 'red' | 'amber' {
   const n = Number(value);
@@ -34,6 +34,9 @@ export default function ReceiptDetailPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [supplierPaidKgs, setSupplierPaidKgs] = useState('');
+  const [paymentAccountId, setPaymentAccountId] = useState('');
+  const [companyAccounts, setCompanyAccounts] = useState<Array<{ id: string; name: string }>>([]);
 
   const editable = receipt?.status === 'DRAFT' || receipt?.status === 'RECEIVING';
 
@@ -54,6 +57,13 @@ export default function ReceiptDetailPage() {
     setReceived(map);
     const calc = await api<ReceiptCalculationPreview>(`/purchase-receipts/${id}/calculate`);
     setPreview(calc);
+    try {
+      const accounts = await api<Array<{ id: string; name: string }>>('/accounting/company-accounts');
+      setCompanyAccounts(accounts);
+      setPaymentAccountId((current) => current || accounts[0]?.id || '');
+    } catch {
+      setCompanyAccounts([]);
+    }
   }, [id]);
 
   useEffect(() => {
@@ -110,6 +120,8 @@ export default function ReceiptDetailPage() {
           discrepancyComments: Object.entries(comments)
             .filter(([, value]) => value.trim())
             .map(([productId, commentValue]) => ({ productId, comment: commentValue })),
+          supplierPaidKgs: supplierPaidKgs || '0',
+          paymentAccountId: Number(supplierPaidKgs || 0) > 0 ? paymentAccountId : undefined,
         }),
       });
       setConfirmOpen(false);
@@ -396,9 +408,14 @@ export default function ReceiptDetailPage() {
           </Button>
         </div>
       ) : receipt.status === 'COMPLETED' ? (
-        <Button variant="secondary" onClick={() => router.push('/warehouse/movements')}>
-          Смотреть движения
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button variant="secondary" onClick={() => router.push('/warehouse/movements')}>
+            Смотреть движения
+          </Button>
+          <Button variant="danger" disabled={busy} onClick={() => void cancelReceipt()}>
+            Сторнировать приход
+          </Button>
+        </div>
       ) : null}
 
       {confirmOpen ? (
@@ -413,6 +430,37 @@ export default function ReceiptDetailPage() {
                 <p>Излишек: {qty(preview.totals.totalExcess)}</p>
                 <p>Транспорт: {money(preview.totals.totalTransportKgs, 'KGS')}</p>
                 <p className="font-semibold">Себестоимость: {money(preview.totals.totalLandedCostKgs, 'KGS')}</p>
+                <Field label="Оплачено поставщику сейчас (KGS)">
+                  <Input
+                    inputMode="decimal"
+                    value={supplierPaidKgs}
+                    onChange={(e) => setSupplierPaidKgs(e.target.value)}
+                    placeholder="0 = в долг"
+                  />
+                </Field>
+                {Number(supplierPaidKgs || 0) > 0 ? (
+                  <Field label="Счёт компании">
+                    <Select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)}>
+                      {companyAccounts.map((account) => (
+                        <option key={account.id} value={account.id}>{account.name}</option>
+                      ))}
+                    </Select>
+                  </Field>
+                ) : null}
+                <p className="text-muted">
+                  Остаток поставщику:{' '}
+                  {money(
+                    String(
+                      Math.max(
+                        0,
+                        Number(preview.totals.totalLandedCostKgs) -
+                          Number(preview.totals.cargoKgs ?? 0) -
+                          Number(supplierPaidKgs || 0),
+                      ),
+                    ),
+                    'KGS',
+                  )}
+                </p>
               </div>
             ) : null}
             <div className="flex flex-col gap-2 sm:flex-row">

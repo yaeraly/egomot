@@ -33,10 +33,11 @@ export default function SalesPage() {
               <Link href="/reports?tab=sales" className="inline-flex min-h-12 items-center rounded-xl border border-line px-4 font-semibold">
                 Отчёт
               </Link>
-            ) : null}
-            <Link href="/sales/balance" className="inline-flex min-h-12 items-center rounded-xl border border-line px-4 font-semibold">
-              Мой баланс
-            </Link>
+            ) : (
+              <Link href="/sales/balance" className="inline-flex min-h-12 items-center rounded-xl border border-line px-4 font-semibold">
+                Мой баланс
+              </Link>
+            )}
             <Link href="/sales/new" className="inline-flex min-h-12 items-center rounded-xl bg-brand px-4 font-semibold text-white">
               + Продажа
             </Link>

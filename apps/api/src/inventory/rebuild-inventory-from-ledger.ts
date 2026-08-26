@@ -1,4 +1,4 @@
-import { InventoryMovementType, Prisma } from '@prisma/client';
+import { InventoryMovementType, InventoryReferenceType, Prisma, PurchaseReceiptStatus, SaleStatus } from '@prisma/client';
 import { computeInventoryAfterReceipt } from '../purchase-receipts/receipt-calc';
 import { computeInventoryAfterSale } from '../sales/sale-calc';
 
@@ -127,4 +127,75 @@ export function rebuildInventoryFromReceiptMovements(
     })),
     productIds,
   );
+}
+
+export async function rebuildInventorySkippingCancelledDocuments(
+  db: Prisma.TransactionClient,
+  productIds: string[],
+) {
+  if (productIds.length === 0) return [];
+
+  const movements = await db.inventoryMovement.findMany({
+    where: { productId: { in: productIds } },
+    orderBy: [{ transactionDate: 'asc' }, { createdAt: 'asc' }],
+  });
+
+  const saleIds = [
+    ...new Set(
+      movements
+        .filter((row) => row.referenceType === InventoryReferenceType.SALE)
+        .map((row) => row.referenceId),
+    ),
+  ];
+  const receiptIds = [
+    ...new Set(
+      movements
+        .filter((row) => row.referenceType === InventoryReferenceType.PURCHASE_RECEIPT)
+        .map((row) => row.referenceId),
+    ),
+  ];
+
+  const cancelledSales = saleIds.length
+    ? await db.sale.findMany({
+        where: { id: { in: saleIds }, status: SaleStatus.CANCELLED },
+        select: { id: true },
+      })
+    : [];
+  const cancelledReceipts = receiptIds.length
+    ? await db.purchaseReceipt.findMany({
+        where: { id: { in: receiptIds }, status: PurchaseReceiptStatus.CANCELLED },
+        select: { id: true },
+      })
+    : [];
+  const skipSales = new Set(cancelledSales.map((row) => row.id));
+  const skipReceipts = new Set(cancelledReceipts.map((row) => row.id));
+
+  const active = movements.filter((row) => {
+    if (row.referenceType === InventoryReferenceType.SALE) {
+      return !skipSales.has(row.referenceId);
+    }
+    if (row.referenceType === InventoryReferenceType.PURCHASE_RECEIPT) {
+      return !skipReceipts.has(row.referenceId);
+    }
+    return true;
+  });
+
+  const snapshots = rebuildInventoryFromLedgerMovements(active, productIds);
+  for (const snapshot of snapshots) {
+    await db.inventory.upsert({
+      where: { productId: snapshot.productId },
+      update: {
+        quantity: snapshot.quantity,
+        averageUnitCostKgs: snapshot.averageUnitCostKgs,
+        totalValueKgs: snapshot.totalValueKgs,
+      },
+      create: {
+        productId: snapshot.productId,
+        quantity: snapshot.quantity,
+        averageUnitCostKgs: snapshot.averageUnitCostKgs,
+        totalValueKgs: snapshot.totalValueKgs,
+      },
+    });
+  }
+  return snapshots;
 }
