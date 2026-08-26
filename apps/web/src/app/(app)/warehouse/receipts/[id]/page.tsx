@@ -454,7 +454,7 @@ export default function ReceiptDetailPage() {
                       Math.max(
                         0,
                         Number(preview.totals.totalLandedCostKgs) -
-                          Number(preview.totals.cargoKgs ?? 0) -
+                          Number(preview.totals.totalTransportKgs ?? 0) -
                           Number(supplierPaidKgs || 0),
                       ),
                     ),

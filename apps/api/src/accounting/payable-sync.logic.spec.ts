@@ -315,7 +315,8 @@ describe('payable ledger sync vs finance dashboard', () => {
       'utf8',
     );
     expect(page).toContain('Поставщики');
-    expect(page).toContain('Карго и транспорт');
+    expect(page).toContain('Карго');
+    expect(page).toContain('Транспорт');
     expect(page).toContain('Оплатить');
     expect(page).toContain('Не оплачено');
     expect(page).toContain('Частично оплачено');

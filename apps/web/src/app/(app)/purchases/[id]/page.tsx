@@ -99,10 +99,22 @@ export default function PurchaseViewPage() {
       <PurchaseLogisticsSection purchase={purchase} onChanged={load} />
       <Card className="grid gap-2 sm:grid-cols-2">
         <p className="sm:col-span-2 font-semibold">Расчёты и долги</p>
+        <p>Стоимость товара: {moneySom(purchase.totalPurchaseCostKgs)}</p>
         <p>Оплачено поставщику: {moneySom(purchase.supplierPaidAmountKgs ?? '0')}</p>
         <p>Долг поставщику: {moneySom(purchase.supplierUnpaidAmountKgs ?? '0')}</p>
-        <p>Оплачено за логистику: {moneySom(purchase.logisticsPaidAmountKgs ?? '0')}</p>
-        <p>Долг за логистику: {moneySom(purchase.logisticsUnpaidAmountKgs ?? '0')}</p>
+        <p>Транспорт по Китаю: {moneySom(purchase.totalChinaTransportKgs)}</p>
+        <p>Оплачено: {moneySom(purchase.chinaTransportPaidKgs ?? '0')}</p>
+        <p>Долг: {moneySom(purchase.chinaTransportUnpaidKgs ?? '0')}</p>
+        <p>Карго: {moneySom(purchase.totalCargoKgs)}</p>
+        <p>Оплачено: {moneySom(purchase.cargoPaidKgs ?? '0')}</p>
+        <p>Долг: {moneySom(purchase.cargoUnpaidKgs ?? '0')}</p>
+        <p>Транспорт по Кыргызстану: {moneySom(purchase.totalKgInternalTransportKgs)}</p>
+        <p>Оплачено: {moneySom(purchase.kgInternalTransportPaidKgs ?? '0')}</p>
+        <p>Долг: {moneySom(purchase.kgInternalTransportUnpaidKgs ?? '0')}</p>
+        <p>Общие логистические расходы: {moneySom(purchase.totalLogisticsKgs)}</p>
+        <p className="sm:col-span-2 font-semibold">
+          Итоговая себестоимость закупки: {moneySom(purchase.estimatedTotalLandedCostKgs)}
+        </p>
         <p className="sm:col-span-2 font-semibold">
           Общая задолженность: {moneySom(purchase.totalUnpaidAmountKgs ?? purchase.unpaidAmountKgs ?? '0')}
         </p>

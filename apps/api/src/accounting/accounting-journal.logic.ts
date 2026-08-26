@@ -170,29 +170,59 @@ export function buildPartialPurchaseLines(params: {
 
 /**
  * Recognize landed inventory on a completed receipt.
- * Cargo is capitalized into inventory and credited to cargo AP when unpaid.
- * Supplier portion (goods + non-cargo transport) is split:
- *   paidSupplierKgs credits Cash/Bank (only when an actual payment amount is provided)
- *   remainder credits supplier AP.
- * paidSupplierKgs defaults to 0 — never invent a historical payment.
+ * Inventory debit is the full landed cost (goods + logistics).
+ * Payables are classified by owner:
+ *   unpaid goods → Supplier AP 2000
+ *   unpaid cargo → Cargo AP 2010
+ *   unpaid China + Kyrgyzstan transport → Transport AP 2020
+ * paidSupplierKgs credits Cash/Bank against goods only. Defaults to 0.
  */
 export function buildPurchaseReceiptLines(params: {
-  inventoryKgs: Decimal.Value;
+  inventoryKgs?: Decimal.Value;
+  goodsKgs?: Decimal.Value;
+  chinaTransportKgs?: Decimal.Value;
   cargoKgs?: Decimal.Value;
+  kyrgyzstanTransportKgs?: Decimal.Value;
   paidSupplierKgs?: Decimal.Value;
   cashAccountCode?: AccountCode;
 }): JournalLineDraft[] {
-  const inventory = requirePositive(params.inventoryKgs, 'Receipt inventory');
+  const china = roundMoney(params.chinaTransportKgs ?? 0);
   const cargo = roundMoney(params.cargoKgs ?? 0);
-  if (cargo.lt(0) || cargo.gt(inventory)) {
-    throw new InvalidJournalLineError('Cargo amount is out of range for landed inventory');
+  const kyrgyzstan = roundMoney(params.kyrgyzstanTransportKgs ?? 0);
+  if (china.lt(0) || cargo.lt(0) || kyrgyzstan.lt(0)) {
+    throw new InvalidJournalLineError('Logistics amounts cannot be negative');
   }
-  const supplierPortion = roundMoney(inventory.minus(cargo));
+  const logistics = roundMoney(china.plus(cargo).plus(kyrgyzstan));
+
+  let inventory: Decimal;
+  let goods: Decimal;
+  if (params.goodsKgs != null) {
+    goods = roundMoney(params.goodsKgs);
+    if (goods.lt(0)) {
+      throw new InvalidJournalLineError('Goods amount cannot be negative');
+    }
+    inventory =
+      params.inventoryKgs != null
+        ? requirePositive(params.inventoryKgs, 'Receipt inventory')
+        : requirePositive(goods.plus(logistics), 'Receipt inventory');
+  } else {
+    inventory = requirePositive(params.inventoryKgs ?? 0, 'Receipt inventory');
+    goods = roundMoney(inventory.minus(logistics));
+  }
+
+  if (logistics.gt(inventory)) {
+    throw new InvalidJournalLineError('Logistics amounts exceed landed inventory');
+  }
+  if (!roundMoney(goods.plus(logistics)).eq(inventory)) {
+    throw new InvalidJournalLineError('Goods plus logistics must equal landed inventory');
+  }
+
   const paid = roundMoney(params.paidSupplierKgs ?? 0);
-  if (paid.lt(0) || paid.gt(supplierPortion)) {
+  if (paid.lt(0) || paid.gt(goods)) {
     throw new InvalidJournalLineError('Receipt supplier paid amount is out of range');
   }
-  const unpaid = roundMoney(supplierPortion.minus(paid));
+  const unpaidGoods = roundMoney(goods.minus(paid));
+  const unpaidTransport = roundMoney(china.plus(kyrgyzstan));
   const cashCode = params.cashAccountCode ?? ACCOUNT_CODE.CASH;
   const lines: JournalLineDraft[] = [
     line(ACCOUNT_CODE.INVENTORY, inventory, 0, 'Purchase receipt landed cost'),
@@ -200,11 +230,14 @@ export function buildPurchaseReceiptLines(params: {
   if (paid.gt(0)) {
     lines.push(line(cashCode, 0, paid, 'Purchase cash'));
   }
-  if (unpaid.gt(0)) {
-    lines.push(line(ACCOUNT_CODE.SUPPLIER_AP, 0, unpaid, 'Supplier payable'));
+  if (unpaidGoods.gt(0)) {
+    lines.push(line(ACCOUNT_CODE.SUPPLIER_AP, 0, unpaidGoods, 'Supplier payable'));
   }
   if (cargo.gt(0)) {
     lines.push(line(ACCOUNT_CODE.CARGO_AP, 0, cargo, 'Cargo payable'));
+  }
+  if (unpaidTransport.gt(0)) {
+    lines.push(line(ACCOUNT_CODE.TRANSPORT_AP, 0, unpaidTransport, 'Transport payable'));
   }
   return lines;
 }

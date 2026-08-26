@@ -6,6 +6,7 @@ import {
   FINAL_EXPECTED_TOTAL_QUANTITY,
 } from '../sales/historical-sales-import.logic';
 import {
+  ACCOUNT_CODE,
   OPENING_INVESTOR_CAPITAL_KGS,
   OPERATIONAL_WALLET_STATED_KGS,
   glCashAccountCodeForPaymentMethod,
@@ -33,6 +34,8 @@ import {
   grossDebit,
   type JournalLineDraft,
 } from './accounting-journal.logic';
+import { buildLogisticsCostLines } from './logistics-cost.logic';
+import { splitPurchaseLandedCost } from './payable-classification.logic';
 
 export const BACKFILL_STATUS = {
   PASS: 'PASS',
@@ -122,7 +125,9 @@ export type PlannedBackfillJournal = {
     | 'PURCHASE'
     | 'CARGO'
     | 'PURCHASE_PAYMENT'
-    | 'CARGO_PAYMENT';
+    | 'CARGO_PAYMENT'
+    | 'LOGISTICS_CHINA'
+    | 'LOGISTICS_KYRGYZSTAN';
   sourceId: string;
   memo: string;
   postedAt: Date;
@@ -171,6 +176,8 @@ export type BackfillPurchaseInput = {
   supplierId: string;
   estimatedTotalLandedCostKgs: string;
   totalCargoKgs: string;
+  totalChinaTransportKgs?: string;
+  totalKgInternalTransportKgs?: string;
   purchaseDate: Date | null;
   completedReceipts: Array<{
     id: string;
@@ -191,6 +198,8 @@ export type BackfillPurchaseInput = {
   alreadyPosted: {
     purchase: boolean;
     cargo: boolean;
+    china?: boolean;
+    kyrgyzstan?: boolean;
     paymentIds: string[];
     cargoPaymentIds: string[];
   };
@@ -244,6 +253,7 @@ export type HistoricalBackfillTotals = {
   verifiedSupplierPaymentsKgs: string;
   cargoTotalKgs: string;
   cargoApKgs: string;
+  transportApKgs: string;
   verifiedCargoPaymentsKgs: string;
   openingInvestorCapitalKgs: string;
   verifiedCashInKgs: string;
@@ -321,21 +331,50 @@ export function isBackfillableSale(status: string): boolean {
 
 export function splitLandedCost(params: {
   landedKgs: Decimal.Value;
-  cargoKgs: Decimal.Value;
-}): { landed: Decimal; cargo: Decimal; supplier: Decimal } {
-  const landed = roundMoney(params.landedKgs);
-  const cargo = roundMoney(Decimal.min(landed, Decimal.max(0, roundMoney(params.cargoKgs))));
-  const supplier = remainingPayableAmount(landed, cargo);
-  return { landed, cargo, supplier };
+  cargoKgs?: Decimal.Value;
+  chinaTransportKgs?: Decimal.Value;
+  kyrgyzstanTransportKgs?: Decimal.Value;
+  goodsKgs?: Decimal.Value;
+}): {
+  landed: Decimal;
+  cargo: Decimal;
+  china: Decimal;
+  kyrgyzstan: Decimal;
+  transport: Decimal;
+  supplier: Decimal;
+  goods: Decimal;
+} {
+  const split = splitPurchaseLandedCost({
+    landedKgs: params.landedKgs,
+    goodsKgs: params.goodsKgs,
+    chinaTransportKgs: params.chinaTransportKgs,
+    cargoKgs: params.cargoKgs,
+    kyrgyzstanTransportKgs: params.kyrgyzstanTransportKgs,
+  });
+  return {
+    landed: split.landedKgs,
+    cargo: split.cargoKgs,
+    china: split.chinaTransportKgs,
+    kyrgyzstan: split.kyrgyzstanTransportKgs,
+    transport: split.transportKgs,
+    supplier: split.supplierKgs,
+    goods: split.goodsKgs,
+  };
 }
 
 export function purchaseRecognitionAmounts(purchase: BackfillPurchaseInput): {
   landed: Decimal;
   cargo: Decimal;
+  china: Decimal;
+  kyrgyzstan: Decimal;
+  transport: Decimal;
   supplier: Decimal;
+  goods: Decimal;
   usedReceipts: boolean;
   liveReceiptAlreadyPosted: boolean;
 } {
+  const china = roundMoney(purchase.totalChinaTransportKgs ?? 0);
+  const kyrgyzstan = roundMoney(purchase.totalKgInternalTransportKgs ?? 0);
   const completed = purchase.completedReceipts;
   if (completed.length > 0) {
     const landed = roundMoney(
@@ -344,7 +383,12 @@ export function purchaseRecognitionAmounts(purchase: BackfillPurchaseInput): {
     const cargo = roundMoney(
       completed.reduce((sum, row) => sum.plus(roundMoney(row.cargoKgs)), zero()),
     );
-    const split = splitLandedCost({ landedKgs: landed, cargoKgs: cargo });
+    const split = splitLandedCost({
+      landedKgs: landed,
+      cargoKgs: cargo,
+      chinaTransportKgs: china,
+      kyrgyzstanTransportKgs: kyrgyzstan,
+    });
     return {
       ...split,
       usedReceipts: true,
@@ -354,6 +398,8 @@ export function purchaseRecognitionAmounts(purchase: BackfillPurchaseInput): {
   const split = splitLandedCost({
     landedKgs: purchase.estimatedTotalLandedCostKgs,
     cargoKgs: purchase.totalCargoKgs,
+    chinaTransportKgs: china,
+    kyrgyzstanTransportKgs: kyrgyzstan,
   });
   return { ...split, usedReceipts: false, liveReceiptAlreadyPosted: false };
 }
@@ -557,6 +603,62 @@ export function planHistoricalBackfill(
         }
       }
 
+      if (doPurchases && amounts.china.gt(0)) {
+        if (amounts.liveReceiptAlreadyPosted) {
+          skipped.push({
+            sourceType: 'LOGISTICS_CHINA',
+            sourceId: purchase.id,
+            reason: 'live PURCHASE_RECEIPT journal already posted',
+          });
+        } else {
+          pushJournal(
+            planned,
+            skipped,
+            issues,
+            {
+              sourceType: 'LOGISTICS_CHINA',
+              sourceId: purchase.id,
+              purchaseId: purchase.id,
+              memo: `Historical China transport ${purchase.number}`,
+              postedAt,
+              lines: buildLogisticsCostLines({
+                amountKgs: amounts.china,
+                payableAccountCode: ACCOUNT_CODE.TRANSPORT_AP,
+              }),
+            },
+            purchase.alreadyPosted.china === true,
+          );
+        }
+      }
+
+      if (doPurchases && amounts.kyrgyzstan.gt(0)) {
+        if (amounts.liveReceiptAlreadyPosted) {
+          skipped.push({
+            sourceType: 'LOGISTICS_KYRGYZSTAN',
+            sourceId: purchase.id,
+            reason: 'live PURCHASE_RECEIPT journal already posted',
+          });
+        } else {
+          pushJournal(
+            planned,
+            skipped,
+            issues,
+            {
+              sourceType: 'LOGISTICS_KYRGYZSTAN',
+              sourceId: purchase.id,
+              purchaseId: purchase.id,
+              memo: `Historical Kyrgyzstan transport ${purchase.number}`,
+              postedAt,
+              lines: buildLogisticsCostLines({
+                amountKgs: amounts.kyrgyzstan,
+                payableAccountCode: ACCOUNT_CODE.TRANSPORT_AP,
+              }),
+            },
+            purchase.alreadyPosted.kyrgyzstan === true,
+          );
+        }
+      }
+
       if (doPayments) {
         for (const payment of purchase.purchasePayments) {
           pushJournal(
@@ -733,6 +835,7 @@ export function summarizeBackfillPlan(params: {
   let inventoryIn = zero();
   let supplierApGross = zero();
   let cargoGross = zero();
+  let transportGross = zero();
   let verifiedSupplier = zero();
   let verifiedCargo = zero();
   let withoutReceipts = 0;
@@ -742,12 +845,14 @@ export function summarizeBackfillPlan(params: {
     inventoryIn = inventoryIn.plus(amounts.landed);
     supplierApGross = supplierApGross.plus(amounts.supplier);
     cargoGross = cargoGross.plus(amounts.cargo);
+    transportGross = transportGross.plus(amounts.transport);
     verifiedSupplier = verifiedSupplier.plus(verifiedSupplierPaymentTotal(purchase));
     verifiedCargo = verifiedCargo.plus(verifiedCargoPaymentTotal(purchase));
   }
 
   const supplierAp = remainingPayableAmount(supplierApGross, verifiedSupplier);
   const cargoAp = remainingPayableAmount(cargoGross, verifiedCargo);
+  const transportAp = transportGross;
 
   const verifiedCashIn = roundMoney(
     grossDebit(lines, '1000').plus(grossDebit(lines, '1010')),
@@ -805,6 +910,7 @@ export function summarizeBackfillPlan(params: {
     verifiedSupplierPaymentsKgs: moneyStr(verifiedSupplier),
     cargoTotalKgs: moneyStr(cargoGross),
     cargoApKgs: moneyStr(cargoAp),
+    transportApKgs: moneyStr(transportAp),
     verifiedCargoPaymentsKgs: moneyStr(verifiedCargo),
     openingInvestorCapitalKgs: moneyStr(opening),
     verifiedCashInKgs: moneyStr(verifiedCashIn),
@@ -854,7 +960,7 @@ export function summarizeBackfillPlan(params: {
     operationalArKgs: moneyStr(operationalAr),
     glArKgs: moneyStr(glAr),
     arDifferenceKgs: moneyStr(glAr.minus(operationalAr)),
-    totalApKgs: moneyStr(supplierAp.plus(cargoAp)),
+    totalApKgs: moneyStr(supplierAp.plus(cargoAp).plus(transportAp)),
     plannedJournalCount: params.planned.length,
     skippedCount: params.skipped.length,
     inventedPaymentAttempts: params.inventedPaymentAttempts,
@@ -993,6 +1099,9 @@ export function formatHistoricalBackfillReport(
     'Cargo payable:',
     t.cargoApKgs,
     '',
+    'Transport payable:',
+    t.transportApKgs,
+    '',
     'Purchase.status=PAID was not treated as payment evidence.',
     '',
     '',
@@ -1115,6 +1224,9 @@ export function formatHistoricalBackfillReport(
     '',
     'Cargo AP:',
     t.cargoApKgs,
+    '',
+    'Transport AP:',
+    t.transportApKgs,
     '',
     'Total AP:',
     t.totalApKgs,

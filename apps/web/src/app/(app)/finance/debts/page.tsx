@@ -13,7 +13,7 @@ import {
   supplierPaymentTargetFromPayable,
 } from '@/lib/supplier-payment';
 
-type Tab = 'customer' | 'supplier' | 'logistics';
+type Tab = 'customer' | 'supplier' | 'cargo' | 'transport';
 type StatusFilter = 'OPEN' | 'ALL' | 'UNPAID' | 'PARTIAL' | 'PAID';
 
 interface SupplierPayableRow {
@@ -98,7 +98,6 @@ export default function DebtsPage() {
   const [logistics, setLogistics] = useState<LogisticsDebtRow[]>([]);
   const [cargoTotal, setCargoTotal] = useState('0.00');
   const [transportTotal, setTransportTotal] = useState('0.00');
-  const [logisticsTotal, setLogisticsTotal] = useState('0.00');
   const [customers, setCustomers] = useState<CustomerDebt | null>(null);
   const [accounts, setAccounts] = useState<CompanyPaymentAccount[]>([]);
   const [supplierPaymentTarget, setSupplierPaymentTarget] =
@@ -157,16 +156,10 @@ export default function DebtsPage() {
             .reduce((sum, row) => sum + Math.max(0, Number(row.remainingAmountKgs)), 0)
             .toFixed(2),
         );
-        setLogisticsTotal(
-          payload
-            .reduce((sum, row) => sum + Math.max(0, Number(row.remainingAmountKgs)), 0)
-            .toFixed(2),
-        );
       } else {
         setLogistics(payload.rows);
         setCargoTotal(payload.cargoRemainingKgs);
         setTransportTotal(payload.transportRemainingKgs);
-        setLogisticsTotal(payload.remainingKgs);
       }
     } else {
       setLogistics([]);
@@ -218,16 +211,22 @@ export default function DebtsPage() {
     return row.id ?? `${row.purchaseNumber}-${index}`;
   }
 
+  const visibleLogistics = logistics.filter((row) =>
+    tab === 'cargo' ? row.kind === 'CARGO' : row.kind === 'TRANSPORT',
+  );
+  const logisticsKindLabel = tab === 'cargo' ? 'карго' : 'транспорт';
+
   return (
     <div className="space-y-4">
-      <PageHeader title="Долги" subtitle="Клиенты, поставщики, карго и транспорт" />
+      <PageHeader title="Долги" subtitle="Клиенты, поставщики, карго и транспорт — раздельно" />
       <ErrorText error={error} />
       <div className="flex flex-wrap gap-2">
         {(
           [
             ['customer', 'Клиенты'],
             ['supplier', 'Поставщики'],
-            ['logistics', 'Карго и транспорт'],
+            ['cargo', 'Карго'],
+            ['transport', 'Транспорт'],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -345,22 +344,16 @@ export default function DebtsPage() {
         </div>
       ) : null}
 
-      {tab === 'logistics' ? (
+      {tab === 'cargo' || tab === 'transport' ? (
         <div className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Card>
-              <p className="text-sm text-muted">Долг за карго</p>
-              <p className="text-2xl font-bold">{moneySom(cargoTotal)}</p>
-            </Card>
-            <Card>
-              <p className="text-sm text-muted">Долг за транспорт</p>
-              <p className="text-2xl font-bold">{moneySom(transportTotal)}</p>
-            </Card>
-            <Card>
-              <p className="text-sm text-muted">Общий долг по логистике</p>
-              <p className="text-2xl font-bold">{moneySom(logisticsTotal)}</p>
-            </Card>
-          </div>
+          <Card>
+            <p className="text-sm text-muted">
+              {tab === 'cargo' ? 'Долг за карго' : 'Долг за транспорт'}
+            </p>
+            <p className="text-2xl font-bold">
+              {moneySom(tab === 'cargo' ? cargoTotal : transportTotal)}
+            </p>
+          </Card>
           <div className="hidden overflow-x-auto md:block">
             <table className="w-full min-w-[1100px] text-left text-sm">
               <thead>
@@ -379,14 +372,14 @@ export default function DebtsPage() {
                 </tr>
               </thead>
               <tbody>
-                {logistics.length === 0 ? (
+                {visibleLogistics.length === 0 ? (
                   <tr>
                     <td className="py-3 text-muted" colSpan={11}>
-                      Нет долгов за карго и транспорт
+                      Нет долгов за {logisticsKindLabel}
                     </td>
                   </tr>
                 ) : (
-                  logistics.map((row) => (
+                  visibleLogistics.map((row) => (
                     <tr key={`${row.kind}-${row.payableId}`} className="border-b border-line align-top">
                       <td className="py-2 pr-3 font-semibold">{row.payeeName || 'Получатель не указан'}</td>
                       <td className="py-2 pr-3">{TYPE_LABELS[row.type] ?? row.type}</td>
@@ -422,7 +415,7 @@ export default function DebtsPage() {
             </table>
           </div>
           <div className="space-y-3 md:hidden">
-            {logistics.map((row) => (
+            {visibleLogistics.map((row) => (
               <Card key={`${row.kind}-${row.payableId}`} className="space-y-1 text-sm">
                 <div className="flex justify-between gap-2">
                   <p className="font-semibold">{row.payeeName || 'Получатель не указан'}</p>

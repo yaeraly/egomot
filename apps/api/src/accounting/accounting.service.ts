@@ -237,6 +237,8 @@ export class AccountingService {
       supplierId: string;
       inventoryKgs: Prisma.Decimal | string;
       cargoKgs: Prisma.Decimal | string;
+      chinaTransportKgs?: Prisma.Decimal | string;
+      kyrgyzstanTransportKgs?: Prisma.Decimal | string;
       createdByUserId: string;
       postedAt?: Date;
       cargoVendorId?: string | null;
@@ -258,14 +260,18 @@ export class AccountingService {
     });
 
     const cargo = roundMoney(params.cargoKgs);
+    const china = roundMoney(params.chinaTransportKgs ?? 0);
+    const kyrgyzstan = roundMoney(params.kyrgyzstanTransportKgs ?? 0);
     const paidSupplier = roundMoney(params.paidSupplierKgs ?? 0);
-    const supplierPortion = remainingPayableAmount(inventory, cargo);
+    const supplierPortion = remainingPayableAmount(inventory, cargo.plus(china).plus(kyrgyzstan));
     const unpaidSupplier = remainingPayableAmount(supplierPortion, paidSupplier);
     const lines = await this.tagCompanyCashLines(
       db,
       buildPurchaseReceiptLines({
         inventoryKgs: inventory,
+        chinaTransportKgs: china,
         cargoKgs: cargo,
+        kyrgyzstanTransportKgs: kyrgyzstan,
         paidSupplierKgs: paidSupplier,
         cashAccountCode: (params.cashAccountCode as AccountCode | undefined) ?? ACCOUNT_CODE.CASH,
       }),

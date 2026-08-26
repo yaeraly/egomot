@@ -19,7 +19,33 @@ type Totals = PurchasePreview['totals'] | Pick<
   | 'estimatedTotalLandedCostKgs'
   | 'averageLogisticsCostPerKg'
   | 'exchangeRateCnyToKgs'
+  | 'supplierPaidAmountKgs'
+  | 'supplierUnpaidAmountKgs'
+  | 'chinaTransportPaidKgs'
+  | 'chinaTransportUnpaidKgs'
+  | 'cargoPaidKgs'
+  | 'cargoUnpaidKgs'
+  | 'kgInternalTransportPaidKgs'
+  | 'kgInternalTransportUnpaidKgs'
 >;
+
+type SettlementFields = {
+  supplierPaidAmountKgs?: string;
+  supplierUnpaidAmountKgs?: string;
+  chinaTransportPaidKgs?: string;
+  chinaTransportUnpaidKgs?: string;
+  cargoPaidKgs?: string;
+  cargoUnpaidKgs?: string;
+  kgInternalTransportPaidKgs?: string;
+  kgInternalTransportUnpaidKgs?: string;
+};
+
+function settlementOf(totals: Totals): SettlementFields | null {
+  if ('supplierPaidAmountKgs' in totals || 'supplierUnpaidAmountKgs' in totals) {
+    return totals as SettlementFields;
+  }
+  return null;
+}
 
 export function PurchaseSummary({
   supplierName,
@@ -42,29 +68,108 @@ export function PurchaseSummary({
     > & { productName?: string }
   >;
 }) {
-  const rows: Array<[string, string]> = [
-    ['Поставщик', supplierName || '—'],
-    ['Позиций', String(totals.totalPositions)],
-    ['Количество', qty(totals.totalQuantity)],
-    ['Вес', weight(totals.totalWeightKg)],
-    ['Сумма закупки', money(totals.totalPurchaseCny, 'CNY')],
-    ['Курс CNY → KGS', rate(totals.exchangeRateCnyToKgs)],
-    ['Стоимость товара', money(totals.totalPurchaseCostKgs, 'KGS')],
-    ['Транспорт по Китаю', money(totals.totalChinaTransportKgs, 'KGS')],
-    ['Карго', money(totals.totalCargoKgs, 'KGS')],
-    ['Транспорт по Кыргызстану', money(totals.totalKgInternalTransportKgs, 'KGS')],
-    ['Общие логистические расходы', money(totals.totalLogisticsKgs, 'KGS')],
-    ['Итоговая себестоимость закупки', money(totals.estimatedTotalLandedCostKgs, 'KGS')],
-    ['Логистика за кг', money(totals.averageLogisticsCostPerKg, 'KGS/кг')],
+  const settlement = settlementOf(totals);
+  const rows: Array<{ key: string; label: string; value: string }> = [
+    { key: 'supplier', label: 'Поставщик', value: supplierName || '—' },
+    { key: 'positions', label: 'Позиций', value: String(totals.totalPositions) },
+    { key: 'qty', label: 'Количество', value: qty(totals.totalQuantity) },
+    { key: 'weight', label: 'Вес', value: weight(totals.totalWeightKg) },
+    { key: 'cny', label: 'Сумма закупки', value: money(totals.totalPurchaseCny, 'CNY') },
+    { key: 'rate', label: 'Курс CNY → KGS', value: rate(totals.exchangeRateCnyToKgs) },
+    { key: 'goods', label: 'Стоимость товара', value: money(totals.totalPurchaseCostKgs, 'KGS') },
   ];
+  if (settlement) {
+    rows.push(
+      {
+        key: 'goods-paid',
+        label: 'Оплачено поставщику',
+        value: money(settlement.supplierPaidAmountKgs ?? '0', 'KGS'),
+      },
+      {
+        key: 'goods-debt',
+        label: 'Долг поставщику',
+        value: money(settlement.supplierUnpaidAmountKgs ?? '0', 'KGS'),
+      },
+    );
+  }
+  rows.push({
+    key: 'china',
+    label: 'Транспорт по Китаю',
+    value: money(totals.totalChinaTransportKgs, 'KGS'),
+  });
+  if (settlement) {
+    rows.push(
+      {
+        key: 'china-paid',
+        label: 'Оплачено',
+        value: money(settlement.chinaTransportPaidKgs ?? '0', 'KGS'),
+      },
+      {
+        key: 'china-debt',
+        label: 'Долг',
+        value: money(settlement.chinaTransportUnpaidKgs ?? '0', 'KGS'),
+      },
+    );
+  }
+  rows.push({ key: 'cargo', label: 'Карго', value: money(totals.totalCargoKgs, 'KGS') });
+  if (settlement) {
+    rows.push(
+      {
+        key: 'cargo-paid',
+        label: 'Оплачено',
+        value: money(settlement.cargoPaidKgs ?? '0', 'KGS'),
+      },
+      {
+        key: 'cargo-debt',
+        label: 'Долг',
+        value: money(settlement.cargoUnpaidKgs ?? '0', 'KGS'),
+      },
+    );
+  }
+  rows.push({
+    key: 'kg',
+    label: 'Транспорт по Кыргызстану',
+    value: money(totals.totalKgInternalTransportKgs, 'KGS'),
+  });
+  if (settlement) {
+    rows.push(
+      {
+        key: 'kg-paid',
+        label: 'Оплачено',
+        value: money(settlement.kgInternalTransportPaidKgs ?? '0', 'KGS'),
+      },
+      {
+        key: 'kg-debt',
+        label: 'Долг',
+        value: money(settlement.kgInternalTransportUnpaidKgs ?? '0', 'KGS'),
+      },
+    );
+  }
+  rows.push(
+    {
+      key: 'logistics',
+      label: 'Общие логистические расходы',
+      value: money(totals.totalLogisticsKgs, 'KGS'),
+    },
+    {
+      key: 'landed',
+      label: 'Итоговая себестоимость закупки',
+      value: money(totals.estimatedTotalLandedCostKgs, 'KGS'),
+    },
+    {
+      key: 'per-kg',
+      label: 'Логистика за кг',
+      value: money(totals.averageLogisticsCostPerKg, 'KGS/кг'),
+    },
+  );
 
   return (
     <div className="space-y-4">
       <Card className="space-y-2">
-        {rows.map(([label, value]) => (
-          <div key={label} className="flex items-start justify-between gap-3 text-sm">
-            <span className="text-muted">{label}</span>
-            <span className="text-right font-medium">{value}</span>
+        {rows.map((row) => (
+          <div key={row.key} className="flex items-start justify-between gap-3 text-sm">
+            <span className="text-muted">{row.label}</span>
+            <span className="text-right font-medium">{row.value}</span>
           </div>
         ))}
       </Card>

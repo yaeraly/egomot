@@ -157,6 +157,12 @@ export interface Purchase {
   supplierUnpaidAmountKgs?: string;
   logisticsPaidAmountKgs?: string;
   logisticsUnpaidAmountKgs?: string;
+  chinaTransportPaidKgs?: string;
+  chinaTransportUnpaidKgs?: string;
+  cargoPaidKgs?: string;
+  cargoUnpaidKgs?: string;
+  kgInternalTransportPaidKgs?: string;
+  kgInternalTransportUnpaidKgs?: string;
   totalUnpaidAmountKgs?: string;
   items?: PurchaseItem[];
   logistics?: PurchaseLogistics[];

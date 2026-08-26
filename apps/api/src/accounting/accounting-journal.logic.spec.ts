@@ -75,6 +75,20 @@ describe('accounting journal foundation', () => {
     expect(payableStatusFromAmounts('10000', '4000')).toBe('PARTIAL');
   });
 
+  it('4c. unpaid China/KG transport credits Transport AP, not Supplier AP', () => {
+    const lines = buildPurchaseReceiptLines({
+      inventoryKgs: '1180000',
+      chinaTransportKgs: '50000',
+      cargoKgs: '100000',
+      kyrgyzstanTransportKgs: '30000',
+    });
+    totals(lines);
+    expect(debitNormalBalance(lines, ACCOUNT_CODE.INVENTORY).toFixed(2)).toBe('1180000.00');
+    expect(creditNormalBalance(lines, ACCOUNT_CODE.SUPPLIER_AP).toFixed(2)).toBe('1000000.00');
+    expect(creditNormalBalance(lines, ACCOUNT_CODE.CARGO_AP).toFixed(2)).toBe('100000.00');
+    expect(creditNormalBalance(lines, ACCOUNT_CODE.TRANSPORT_AP).toFixed(2)).toBe('80000.00');
+  });
+
   it('4b. paid-at-receipt purchase: Dr Inventory / Cr Cash / Cr Supplier AP / Cr Cargo AP', () => {
     const lines = buildPurchaseReceiptLines({
       inventoryKgs: '500000',

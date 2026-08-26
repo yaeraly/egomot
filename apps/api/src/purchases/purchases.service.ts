@@ -110,42 +110,81 @@ export class PurchasesService {
     }
     if (purchase.logistics) {
       result.logistics = purchase.logistics.map((row) => this.serializeLogistics(row));
-      const logisticsPaid = (purchase.logistics as Array<{ paidAmountKgs?: Prisma.Decimal }>).reduce(
-        (sum, row) => sum.plus(dec(row.paidAmountKgs ?? 0)),
-        dec(0),
-      );
-      const logisticsUnpaid = (purchase.logistics as Array<{ remainingAmountKgs?: Prisma.Decimal }>).reduce(
-        (sum, row) => sum.plus(dec(row.remainingAmountKgs ?? 0)),
-        dec(0),
-      );
-      result.logisticsPaidAmountKgs = publicDecimal(logisticsPaid);
-      result.logisticsUnpaidAmountKgs = publicDecimal(logisticsUnpaid);
-    } else {
-      result.logisticsPaidAmountKgs = result.logisticsPaidAmountKgs ?? '0.00';
-      result.logisticsUnpaidAmountKgs = result.logisticsUnpaidAmountKgs ?? '0.00';
     }
+    const settlement = this.settlementFromPurchase(purchase);
+    Object.assign(result, settlement);
+    return result;
+  }
+
+  private settlementFromPurchase(purchase: {
+    totalPurchaseCostKgs: Prisma.Decimal;
+    totalChinaTransportKgs: Prisma.Decimal;
+    totalCargoKgs: Prisma.Decimal;
+    totalKgInternalTransportKgs: Prisma.Decimal;
+    logistics?: Array<Record<string, unknown>>;
+    supplierPayables?: unknown;
+    [key: string]: unknown;
+  }) {
+    const logisticsRows = (purchase.logistics ?? []) as Array<{
+      type?: string;
+      amountKgs?: Prisma.Decimal;
+      paidAmountKgs?: Prisma.Decimal;
+      remainingAmountKgs?: Prisma.Decimal;
+    }>;
+
+    const byType = (
+      type: string,
+      fallbackCost: Prisma.Decimal,
+    ): { paid: ReturnType<typeof dec>; debt: ReturnType<typeof dec> } => {
+      const rows = logisticsRows.filter((row) => row.type === type);
+      if (rows.length === 0) {
+        return { paid: dec(0), debt: dec(fallbackCost) };
+      }
+      return {
+        paid: rows.reduce((sum, row) => sum.plus(dec(row.paidAmountKgs ?? 0)), dec(0)),
+        debt: rows.reduce(
+          (sum, row) =>
+            sum.plus(
+              dec(
+                row.remainingAmountKgs ??
+                  remainingPayableAmount(row.amountKgs ?? 0, row.paidAmountKgs ?? 0),
+              ),
+            ),
+          dec(0),
+        ),
+      };
+    };
+
+    const china = byType('CHINA_INTERNAL_TRANSPORT', purchase.totalChinaTransportKgs);
+    const cargo = byType('CARGO', purchase.totalCargoKgs);
+    const kg = byType('KYRGYZSTAN_INTERNAL_TRANSPORT', purchase.totalKgInternalTransportKgs);
 
     const payables = purchase.supplierPayables as
       | Array<{ paidAmountKgs: Prisma.Decimal; remainingAmountKgs: Prisma.Decimal }>
       | undefined;
+    let supplierPaid = dec(0);
+    let supplierUnpaid = dec(purchase.totalPurchaseCostKgs);
     if (payables && payables.length > 0) {
-      const supplierPaid = payables.reduce((sum, row) => sum.plus(dec(row.paidAmountKgs)), dec(0));
-      const supplierUnpaid = payables.reduce(
-        (sum, row) => sum.plus(dec(row.remainingAmountKgs)),
-        dec(0),
-      );
-      result.supplierPaidAmountKgs = publicDecimal(supplierPaid);
-      result.supplierUnpaidAmountKgs = publicDecimal(supplierUnpaid);
-    } else {
-      result.supplierPaidAmountKgs = '0.00';
-      result.supplierUnpaidAmountKgs = result.totalPurchaseCostKgs;
+      supplierPaid = payables.reduce((sum, row) => sum.plus(dec(row.paidAmountKgs)), dec(0));
+      supplierUnpaid = payables.reduce((sum, row) => sum.plus(dec(row.remainingAmountKgs)), dec(0));
     }
-    result.totalUnpaidAmountKgs = publicDecimal(
-      dec(String(result.supplierUnpaidAmountKgs ?? 0)).plus(
-        dec(String(result.logisticsUnpaidAmountKgs ?? 0)),
-      ),
-    );
-    return result;
+
+    const logisticsPaid = china.paid.plus(cargo.paid).plus(kg.paid);
+    const logisticsUnpaid = china.debt.plus(cargo.debt).plus(kg.debt);
+
+    return {
+      supplierPaidAmountKgs: publicDecimal(supplierPaid),
+      supplierUnpaidAmountKgs: publicDecimal(supplierUnpaid),
+      chinaTransportPaidKgs: publicDecimal(china.paid),
+      chinaTransportUnpaidKgs: publicDecimal(china.debt),
+      cargoPaidKgs: publicDecimal(cargo.paid),
+      cargoUnpaidKgs: publicDecimal(cargo.debt),
+      kgInternalTransportPaidKgs: publicDecimal(kg.paid),
+      kgInternalTransportUnpaidKgs: publicDecimal(kg.debt),
+      logisticsPaidAmountKgs: publicDecimal(logisticsPaid),
+      logisticsUnpaidAmountKgs: publicDecimal(logisticsUnpaid),
+      totalUnpaidAmountKgs: publicDecimal(supplierUnpaid.plus(logisticsUnpaid)),
+    };
   }
 
   private serializeItem(item: Record<string, unknown>) {

@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { JournalStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PayableSyncService } from './payable-sync.service';
 import { publicDecimal } from '../common/decimal.util';
 import { resolveDateRange } from '../common/date.util';
 import { moneyStr, roundMoney } from '../purchases/purchase-calc';
@@ -18,9 +19,13 @@ import {
 
 @Injectable()
 export class AccountingReportsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly payableSync: PayableSyncService,
+  ) {}
 
   async loadJournals(): Promise<PostedReportJournal[]> {
+    await this.payableSync.ensurePayableClassification();
     const rows = await this.prisma.journal.findMany({
       where: { status: JournalStatus.POSTED },
       include: {

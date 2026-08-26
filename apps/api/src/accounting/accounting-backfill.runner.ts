@@ -2,6 +2,7 @@ import {
   AccountingSourceType,
   ClientDebtTransactionType,
   InventoryMovementType,
+  LogisticsType,
   PayableStatus,
   PrismaClient,
   PurchaseReceiptStatus,
@@ -108,6 +109,7 @@ export async function loadHistoricalBackfillSnapshot(
               },
             },
           },
+          logistics: true,
         },
         orderBy: { createdAt: 'asc' },
       }),
@@ -125,6 +127,9 @@ export async function loadHistoricalBackfillSnapshot(
               AccountingSourceType.PURCHASE_PAYMENT,
               AccountingSourceType.CARGO,
               AccountingSourceType.CARGO_PAYMENT,
+              AccountingSourceType.LOGISTICS_CHINA,
+              AccountingSourceType.LOGISTICS_KYRGYZSTAN,
+              AccountingSourceType.AP_RECLASS,
             ],
           },
         },
@@ -233,6 +238,8 @@ export async function loadHistoricalBackfillSnapshot(
       supplierId: purchase.supplierId,
       estimatedTotalLandedCostKgs: publicDecimal(purchase.estimatedTotalLandedCostKgs),
       totalCargoKgs: publicDecimal(purchase.totalCargoKgs),
+      totalChinaTransportKgs: publicDecimal(purchase.totalChinaTransportKgs),
+      totalKgInternalTransportKgs: publicDecimal(purchase.totalKgInternalTransportKgs),
       purchaseDate: purchase.purchaseDate,
       completedReceipts,
       purchasePayments: purchase.purchasePayments.map((payment) => ({
@@ -244,6 +251,20 @@ export async function loadHistoricalBackfillSnapshot(
       alreadyPosted: {
         purchase: posted.has(key(AccountingSourceType.PURCHASE, purchase.id)),
         cargo: posted.has(key(AccountingSourceType.CARGO, purchase.id)),
+        china:
+          posted.has(key(AccountingSourceType.LOGISTICS_CHINA, purchase.id)) ||
+          purchase.logistics.some(
+            (row) =>
+              row.type === 'CHINA_INTERNAL_TRANSPORT' &&
+              posted.has(key(AccountingSourceType.LOGISTICS_CHINA, row.id)),
+          ),
+        kyrgyzstan:
+          posted.has(key(AccountingSourceType.LOGISTICS_KYRGYZSTAN, purchase.id)) ||
+          purchase.logistics.some(
+            (row) =>
+              row.type === 'KYRGYZSTAN_INTERNAL_TRANSPORT' &&
+              posted.has(key(AccountingSourceType.LOGISTICS_KYRGYZSTAN, row.id)),
+          ),
         paymentIds: purchase.purchasePayments
           .filter((payment) =>
             posted.has(key(AccountingSourceType.PURCHASE_PAYMENT, payment.id)),
@@ -392,6 +413,34 @@ async function ensureCargoPayable(
   });
 }
 
+async function ensureTransportPayable(
+  prisma: PrismaClient,
+  purchase: BackfillPurchaseInput,
+  type: 'CHINA_INTERNAL_TRANSPORT' | 'KYRGYZSTAN_INTERNAL_TRANSPORT',
+  journalId: string,
+) {
+  const amounts = purchaseRecognitionAmounts(purchase);
+  const amount = type === 'CHINA_INTERNAL_TRANSPORT' ? amounts.china : amounts.kyrgyzstan;
+  if (!amount.gt(0)) return;
+  const existing = await prisma.transportPayable.findFirst({
+    where: { purchaseId: purchase.id, type },
+  });
+  if (existing) return;
+  await prisma.transportPayable.create({
+    data: {
+      purchaseId: purchase.id,
+      type: type as LogisticsType,
+      amountKgs: moneyStr(amount),
+      originalAmount: moneyStr(amount),
+      paidAmountKgs: '0.00',
+      remainingAmountKgs: moneyStr(amount),
+      status: PayableStatus.UNPAID,
+      journalId,
+      currency: 'KGS',
+    },
+  });
+}
+
 async function applyVerifiedPayablePayment(
   prisma: PrismaClient,
   kind: 'supplier' | 'cargo',
@@ -468,6 +517,19 @@ export async function applyHistoricalBackfill(
     }
     if (journal.sourceType === 'CARGO' && purchase) {
       await ensureCargoPayable(prisma, purchase, posted.id);
+    }
+    if (
+      (journal.sourceType === 'LOGISTICS_CHINA' || journal.sourceType === 'LOGISTICS_KYRGYZSTAN') &&
+      purchase
+    ) {
+      await ensureTransportPayable(
+        prisma,
+        purchase,
+        journal.sourceType === 'LOGISTICS_CHINA'
+          ? 'CHINA_INTERNAL_TRANSPORT'
+          : 'KYRGYZSTAN_INTERNAL_TRANSPORT',
+        posted.id,
+      );
     }
     if (journal.sourceType === 'PURCHASE_PAYMENT' && journal.purchaseId && journal.lines[0]) {
       await applyVerifiedPayablePayment(

@@ -1,6 +1,11 @@
 import { Decimal, moneyStr, roundMoney } from '../purchases/purchase-calc';
 import { ACCOUNT_CODE } from './accounting-codes';
 import { payableStatusFromAmounts, remainingPayableAmount } from './accounting-journal.logic';
+import {
+  isApReclassSource,
+  purchaseIdFromApReclassSource,
+  transportTypeFromApReclassSource,
+} from './payable-classification.logic';
 
 export interface JournalApLine {
   accountCode: string;
@@ -80,10 +85,18 @@ export function resolveJournalPurchaseId(
     return lookup.cargoPayments.get(sourceId) ?? lookup.logisticsPayments.get(sourceId) ?? null;
   }
   if (type === 'LOGISTICS_CHINA' || type === 'LOGISTICS_KYRGYZSTAN') {
-    return lookup.logisticsExpenses.get(sourceId) ?? null;
+    return (
+      lookup.logisticsExpenses.get(sourceId) ??
+      (lookup.purchaseIds.has(sourceId) ? sourceId : null)
+    );
   }
   if (type === 'LOGISTICS_CHINA_PAYMENT' || type === 'LOGISTICS_KYRGYZSTAN_PAYMENT') {
     return lookup.logisticsPayments.get(sourceId) ?? null;
+  }
+  if (isApReclassSource(type)) {
+    const purchaseId = purchaseIdFromApReclassSource(sourceId);
+    if (purchaseId && lookup.purchaseIds.has(purchaseId)) return purchaseId;
+    return purchaseId;
   }
   return (
     lookup.logisticsExpenses.get(sourceId) ??
@@ -92,7 +105,13 @@ export function resolveJournalPurchaseId(
   );
 }
 
-export function transportTypeFromSource(sourceType: string): 'CHINA_INTERNAL_TRANSPORT' | 'KYRGYZSTAN_INTERNAL_TRANSPORT' {
+export function transportTypeFromSource(
+  sourceType: string,
+  sourceId?: string,
+): 'CHINA_INTERNAL_TRANSPORT' | 'KYRGYZSTAN_INTERNAL_TRANSPORT' {
+  if (isApReclassSource(sourceType) && sourceId) {
+    return transportTypeFromApReclassSource(sourceId) ?? 'KYRGYZSTAN_INTERNAL_TRANSPORT';
+  }
   if (sourceType === 'LOGISTICS_CHINA' || sourceType === 'LOGISTICS_CHINA_PAYMENT') {
     return 'CHINA_INTERNAL_TRANSPORT';
   }
@@ -103,9 +122,12 @@ function addToAggregate(
   map: Map<string, { recognized: Decimal; paid: Decimal }>,
   purchaseId: string,
   netCredit: Decimal,
+  asRecognitionAdjustment = false,
 ) {
   const current = map.get(purchaseId) ?? { recognized: roundMoney(0), paid: roundMoney(0) };
-  if (netCredit.gt(0)) {
+  if (asRecognitionAdjustment) {
+    current.recognized = roundMoney(Decimal.max(0, current.recognized.plus(netCredit)));
+  } else if (netCredit.gt(0)) {
     current.recognized = roundMoney(current.recognized.plus(netCredit));
   } else if (netCredit.lt(0)) {
     current.paid = roundMoney(current.paid.plus(netCredit.abs()));
@@ -134,7 +156,12 @@ export function aggregateSupplierApByPurchase(
   for (const journal of journals) {
     const purchaseId = resolveJournalPurchaseId(journal, lookup);
     if (!purchaseId) continue;
-    addToAggregate(map, purchaseId, creditMinusDebit(journal.lines, ACCOUNT_CODE.SUPPLIER_AP));
+    addToAggregate(
+      map,
+      purchaseId,
+      creditMinusDebit(journal.lines, ACCOUNT_CODE.SUPPLIER_AP),
+      isApReclassSource(journal.sourceType),
+    );
   }
   return toAggregates(map);
 }
@@ -147,7 +174,12 @@ export function aggregateCargoApByPurchase(
   for (const journal of journals) {
     const purchaseId = resolveJournalPurchaseId(journal, lookup);
     if (!purchaseId) continue;
-    addToAggregate(map, purchaseId, creditMinusDebit(journal.lines, ACCOUNT_CODE.CARGO_AP));
+    addToAggregate(
+      map,
+      purchaseId,
+      creditMinusDebit(journal.lines, ACCOUNT_CODE.CARGO_AP),
+      isApReclassSource(journal.sourceType),
+    );
   }
   return toAggregates(map);
 }
@@ -166,9 +198,13 @@ export function aggregateTransportApByPurchaseAndType(
       journal.sourceType === 'REVERSAL' && journal.reversesSourceType
         ? journal.reversesSourceType
         : journal.sourceType;
-    const type = transportTypeFromSource(sourceType);
+    const sourceId =
+      journal.sourceType === 'REVERSAL' && journal.reversesSourceId
+        ? journal.reversesSourceId
+        : journal.sourceId;
+    const type = transportTypeFromSource(sourceType, sourceId);
     const key = `${purchaseId}:${type}`;
-    addToAggregate(map, key, net);
+    addToAggregate(map, key, net, isApReclassSource(journal.sourceType));
   }
   return toAggregates(map).map((row) => {
     const [purchaseId, type] = row.purchaseId.split(':') as [
