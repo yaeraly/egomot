@@ -42,10 +42,15 @@ import {
   shouldSyncProductPurchasePrice,
 } from './product-purchase-price.sync';
 import { payableStatusFromAmounts, remainingPayableAmount } from '../accounting/accounting-journal.logic';
+import { settlementFromSupplierPayables } from '../accounting/goods-supplier-payable.logic';
+import { PayableSyncService } from '../accounting/payable-sync.service';
 
 @Injectable()
 export class PurchasesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly payableSync: PayableSyncService,
+  ) {}
 
   private runCalc(dto: PurchaseCalcInput & { supplierId?: string | null }): PurchaseCalculation {
     try {
@@ -159,22 +164,19 @@ export class PurchasesService {
     const cargo = byType('CARGO', purchase.totalCargoKgs);
     const kg = byType('KYRGYZSTAN_INTERNAL_TRANSPORT', purchase.totalKgInternalTransportKgs);
 
-    const payables = purchase.supplierPayables as
-      | Array<{ paidAmountKgs: Prisma.Decimal; remainingAmountKgs: Prisma.Decimal }>
-      | undefined;
-    let supplierPaid = dec(0);
-    let supplierUnpaid = dec(purchase.totalPurchaseCostKgs);
-    if (payables && payables.length > 0) {
-      supplierPaid = payables.reduce((sum, row) => sum.plus(dec(row.paidAmountKgs)), dec(0));
-      supplierUnpaid = payables.reduce((sum, row) => sum.plus(dec(row.remainingAmountKgs)), dec(0));
-    }
+    const supplier = settlementFromSupplierPayables(
+      purchase.supplierPayables as
+        | Array<{ paidAmountKgs: Prisma.Decimal; remainingAmountKgs: Prisma.Decimal }>
+        | undefined,
+    );
 
     const logisticsPaid = china.paid.plus(cargo.paid).plus(kg.paid);
     const logisticsUnpaid = china.debt.plus(cargo.debt).plus(kg.debt);
 
     return {
-      supplierPaidAmountKgs: publicDecimal(supplierPaid),
-      supplierUnpaidAmountKgs: publicDecimal(supplierUnpaid),
+      supplierPaidAmountKgs: supplier.supplierPaidAmountKgs,
+      supplierUnpaidAmountKgs: supplier.supplierUnpaidAmountKgs,
+      supplierPayableStatus: supplier.supplierPayableStatus,
       chinaTransportPaidKgs: publicDecimal(china.paid),
       chinaTransportUnpaidKgs: publicDecimal(china.debt),
       cargoPaidKgs: publicDecimal(cargo.paid),
@@ -183,7 +185,7 @@ export class PurchasesService {
       kgInternalTransportUnpaidKgs: publicDecimal(kg.debt),
       logisticsPaidAmountKgs: publicDecimal(logisticsPaid),
       logisticsUnpaidAmountKgs: publicDecimal(logisticsUnpaid),
-      totalUnpaidAmountKgs: publicDecimal(supplierUnpaid.plus(logisticsUnpaid)),
+      totalUnpaidAmountKgs: publicDecimal(dec(supplier.supplierUnpaidAmountKgs).plus(logisticsUnpaid)),
     };
   }
 
@@ -288,6 +290,7 @@ export class PurchasesService {
   }
 
   async get(id: string) {
+    await this.payableSync.ensureGoodsSupplierPayable(id);
     const purchase = await this.prisma.purchase.findUnique({
       where: { id },
       include: this.include(),

@@ -208,7 +208,32 @@ describe('supplier debt payment (PurchasePayment UI flow)', () => {
     }
   });
 
-  it('15. shared SupplierPaymentModal is used from Debts and Purchase pages', () => {
+  it('15. Russian payment API errors stay exact', () => {
+    const { NO_SUPPLIER_DEBT_MESSAGE, PAYMENT_EXCEEDS_REMAINING_MESSAGE, PAYMENT_AMOUNT_MUST_BE_POSITIVE_MESSAGE } =
+      require('./goods-supplier-payable.logic') as typeof import('./goods-supplier-payable.logic');
+    expect(NO_SUPPLIER_DEBT_MESSAGE).toBe(
+      'Нет долга поставщику по этой закупке. Обновите страницу «Долги».',
+    );
+    expect(PAYMENT_EXCEEDS_REMAINING_MESSAGE).toBe('Сумма оплаты не может превышать остаток долга');
+    expect(PAYMENT_AMOUNT_MUST_BE_POSITIVE_MESSAGE).toBe('Сумма оплаты должна быть больше 0');
+  });
+
+  it('16. purchase page payment button is visible only when SupplierPayable remaining > 0', () => {
+    const { settlementFromSupplierPayables } =
+      require('./goods-supplier-payable.logic') as typeof import('./goods-supplier-payable.logic');
+    const open = settlementFromSupplierPayables([
+      { paidAmountKgs: '0', remainingAmountKgs: '100000' },
+    ]);
+    const paid = settlementFromSupplierPayables([
+      { paidAmountKgs: '100000', remainingAmountKgs: '0' },
+    ]);
+    const missing = settlementFromSupplierPayables([]);
+    expect(Number(open.supplierUnpaidAmountKgs) > 0).toBe(true);
+    expect(Number(paid.supplierUnpaidAmountKgs) > 0).toBe(false);
+    expect(Number(missing.supplierUnpaidAmountKgs) > 0).toBe(false);
+  });
+
+  it('17. shared SupplierPaymentModal is used from Debts and Purchase pages', () => {
     const fs = require('fs');
     const path = require('path');
     const debtsPage = fs.readFileSync(

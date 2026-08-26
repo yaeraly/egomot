@@ -153,6 +153,7 @@ export interface Purchase {
   paidAmountKgs?: string;
   unpaidAmountKgs?: string;
   payableStatus?: 'UNPAID' | 'PARTIAL' | 'PAID';
+  supplierPayableStatus?: 'UNPAID' | 'PARTIAL' | 'PAID';
   supplierPaidAmountKgs?: string;
   supplierUnpaidAmountKgs?: string;
   logisticsPaidAmountKgs?: string;

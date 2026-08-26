@@ -289,27 +289,25 @@ export class AccountingService {
       db,
     );
 
-    if (alreadyPosted) {
-      return journal;
-    }
-
     if (supplierPortion.gt(0)) {
       const existing = await db.supplierPayable.findUnique({
         where: { purchaseId: params.purchaseId },
       });
       if (existing) {
-        const amount = roundMoney(dec(existing.amountKgs).plus(supplierPortion));
-        const paid = roundMoney(dec(existing.paidAmountKgs).plus(paidSupplier));
-        const remaining = remainingPayableAmount(amount, paid);
-        await db.supplierPayable.update({
-          where: { id: existing.id },
-          data: {
-            amountKgs: moneyStr(amount),
-            paidAmountKgs: moneyStr(paid),
-            remainingAmountKgs: moneyStr(remaining),
-            status: payableStatusFromAmounts(amount, paid) as PayableStatus,
-          },
-        });
+        if (!alreadyPosted) {
+          const amount = roundMoney(dec(existing.amountKgs).plus(supplierPortion));
+          const paid = roundMoney(dec(existing.paidAmountKgs).plus(paidSupplier));
+          const remaining = remainingPayableAmount(amount, paid);
+          await db.supplierPayable.update({
+            where: { id: existing.id },
+            data: {
+              amountKgs: moneyStr(amount),
+              paidAmountKgs: moneyStr(paid),
+              remainingAmountKgs: moneyStr(remaining),
+              status: payableStatusFromAmounts(amount, paid) as PayableStatus,
+            },
+          });
+        }
       } else {
         await db.supplierPayable.create({
           data: {
@@ -323,6 +321,11 @@ export class AccountingService {
           },
         });
       }
+    }
+
+    if (alreadyPosted) {
+      await this.syncPurchaseSettlement(db, params.purchaseId);
+      return journal;
     }
 
     if (cargo.gt(0)) {

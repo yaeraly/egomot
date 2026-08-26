@@ -34,6 +34,12 @@ export type ApReclassMove = {
   kyrgyzstanKgs: Decimal;
 };
 
+export type ApRestoreMove = {
+  fromCargoKgs: Decimal;
+  fromChinaKgs: Decimal;
+  fromKyrgyzstanKgs: Decimal;
+};
+
 function nonNegative(value: Decimal.Value, label: string): Decimal {
   const amount = roundMoney(value);
   if (amount.lt(0)) {
@@ -185,11 +191,63 @@ export function planApReclassMove(params: {
   return { cargoKgs, chinaKgs, kyrgyzstanKgs };
 }
 
+/**
+ * Move excess cargo/transport AP back onto Supplier AP (goods) without touching Inventory.
+ * Used when mixed AP was fully reclassed off 2000, leaving unpaid goods with no SupplierPayable.
+ */
+export function planSupplierApRestoreMove(params: {
+  supplierRemainingKgs: Decimal.Value;
+  cargoRemainingKgs: Decimal.Value;
+  chinaRemainingKgs?: Decimal.Value;
+  kyrgyzstanRemainingKgs?: Decimal.Value;
+  supplierTargetUnpaidKgs: Decimal.Value;
+  cargoTargetUnpaidKgs: Decimal.Value;
+  chinaTargetUnpaidKgs?: Decimal.Value;
+  kyrgyzstanTargetUnpaidKgs?: Decimal.Value;
+}): ApRestoreMove {
+  const supplierGap = Decimal.max(
+    0,
+    roundMoney(roundMoney(params.supplierTargetUnpaidKgs).minus(roundMoney(params.supplierRemainingKgs))),
+  );
+  const cargoExcess = Decimal.max(
+    0,
+    roundMoney(roundMoney(params.cargoRemainingKgs).minus(roundMoney(params.cargoTargetUnpaidKgs))),
+  );
+  const chinaExcess = Decimal.max(
+    0,
+    roundMoney(
+      roundMoney(params.chinaRemainingKgs ?? 0).minus(roundMoney(params.chinaTargetUnpaidKgs ?? 0)),
+    ),
+  );
+  const kyrgyzstanExcess = Decimal.max(
+    0,
+    roundMoney(
+      roundMoney(params.kyrgyzstanRemainingKgs ?? 0).minus(
+        roundMoney(params.kyrgyzstanTargetUnpaidKgs ?? 0),
+      ),
+    ),
+  );
+
+  const fromCargoKgs = roundMoney(Decimal.min(supplierGap, cargoExcess));
+  let leftover = roundMoney(supplierGap.minus(fromCargoKgs));
+  const fromChinaKgs = roundMoney(Decimal.min(leftover, chinaExcess));
+  leftover = roundMoney(leftover.minus(fromChinaKgs));
+  const fromKyrgyzstanKgs = roundMoney(Decimal.min(leftover, kyrgyzstanExcess));
+  return { fromCargoKgs, fromChinaKgs, fromKyrgyzstanKgs };
+}
+
 export function apReclassSourceId(
   purchaseId: string,
   kind: 'CARGO' | 'CHINA_INTERNAL_TRANSPORT' | 'KYRGYZSTAN_INTERNAL_TRANSPORT',
 ): string {
   return `${AP_RECLASS_SOURCE_PREFIX}${purchaseId}:${kind}`;
+}
+
+export function apRestoreSourceId(
+  purchaseId: string,
+  kind: 'CARGO' | 'CHINA_INTERNAL_TRANSPORT' | 'KYRGYZSTAN_INTERNAL_TRANSPORT',
+): string {
+  return `${AP_RECLASS_SOURCE_PREFIX}${purchaseId}:RESTORE_FROM_${kind}`;
 }
 
 export function purchaseIdFromApReclassSource(sourceId: string): string | null {
@@ -203,8 +261,8 @@ export function purchaseIdFromApReclassSource(sourceId: string): string | null {
 export function transportTypeFromApReclassSource(
   sourceId: string,
 ): 'CHINA_INTERNAL_TRANSPORT' | 'KYRGYZSTAN_INTERNAL_TRANSPORT' | null {
-  if (sourceId.endsWith(':CHINA_INTERNAL_TRANSPORT')) return 'CHINA_INTERNAL_TRANSPORT';
-  if (sourceId.endsWith(':KYRGYZSTAN_INTERNAL_TRANSPORT')) return 'KYRGYZSTAN_INTERNAL_TRANSPORT';
+  if (sourceId.includes('CHINA_INTERNAL_TRANSPORT')) return 'CHINA_INTERNAL_TRANSPORT';
+  if (sourceId.includes('KYRGYZSTAN_INTERNAL_TRANSPORT')) return 'KYRGYZSTAN_INTERNAL_TRANSPORT';
   return null;
 }
 
@@ -235,6 +293,31 @@ export function buildApReclassLines(params: {
   }
   if (toTransport.gt(0)) {
     lines.push(line(ACCOUNT_CODE.TRANSPORT_AP, 0, toTransport, 'Reclass transport AP'));
+  }
+  return lines;
+}
+
+export function buildApRestoreLines(params: {
+  fromCargoKgs?: Decimal.Value;
+  fromChinaKgs?: Decimal.Value;
+  fromKyrgyzstanKgs?: Decimal.Value;
+}): JournalLineDraft[] {
+  const cargo = roundMoney(params.fromCargoKgs ?? 0);
+  const china = roundMoney(params.fromChinaKgs ?? 0);
+  const kyrgyzstan = roundMoney(params.fromKyrgyzstanKgs ?? 0);
+  const fromTransport = roundMoney(china.plus(kyrgyzstan));
+  const toSupplier = roundMoney(cargo.plus(fromTransport));
+  if (!toSupplier.gt(0)) {
+    throw new InvalidJournalLineError('AP restore must move a positive logistics AP amount onto Supplier AP');
+  }
+  const lines: JournalLineDraft[] = [
+    line(ACCOUNT_CODE.SUPPLIER_AP, 0, toSupplier, 'Restore supplier AP from logistics AP'),
+  ];
+  if (cargo.gt(0)) {
+    lines.push(line(ACCOUNT_CODE.CARGO_AP, cargo, 0, 'Restore cargo AP to supplier AP'));
+  }
+  if (fromTransport.gt(0)) {
+    lines.push(line(ACCOUNT_CODE.TRANSPORT_AP, fromTransport, 0, 'Restore transport AP to supplier AP'));
   }
   return lines;
 }

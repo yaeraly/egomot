@@ -26,6 +26,11 @@ import {
   remainingPayableAmount,
 } from './accounting-journal.logic';
 import { AccountingService } from './accounting.service';
+import {
+  NO_SUPPLIER_DEBT_MESSAGE,
+  PAYMENT_AMOUNT_MUST_BE_POSITIVE_MESSAGE,
+  PAYMENT_EXCEEDS_REMAINING_MESSAGE,
+} from './goods-supplier-payable.logic';
 import { PayableSyncService } from './payable-sync.service';
 import { DEFAULT_PAYABLE_LIST_FILTER, filterPayables } from './payable-sync.logic';
 import {
@@ -131,7 +136,7 @@ export class AccountingDocumentsService {
     await this.payableSync.syncFromLedger();
     const amount = roundMoney(dto.amountKgs);
     if (!amount.gt(0)) {
-      throw new BadRequestException('Сумма оплаты должна быть больше 0');
+      throw new BadRequestException(PAYMENT_AMOUNT_MUST_BE_POSITIVE_MESSAGE);
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -142,13 +147,11 @@ export class AccountingDocumentsService {
       if (!purchase) throw new NotFoundException('Purchase not found');
 
       const payable = purchase.supplierPayables[0];
-      if (!payable) {
-        throw new BadRequestException(
-          'Нет долга поставщику по этой закупке. Обновите страницу «Долги».',
-        );
+      if (!payable || !dec(payable.remainingAmountKgs).gt(0)) {
+        throw new BadRequestException(NO_SUPPLIER_DEBT_MESSAGE);
       }
       if (amount.gt(dec(payable.remainingAmountKgs))) {
-        throw new BadRequestException('Сумма оплаты не может превышать остаток долга');
+        throw new BadRequestException(PAYMENT_EXCEEDS_REMAINING_MESSAGE);
       }
 
       const account = await this.accounting.requireCompanyPaymentAccount(

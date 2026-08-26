@@ -1,6 +1,7 @@
 import { Decimal, moneyStr, roundMoney } from '../purchases/purchase-calc';
 import { ACCOUNT_CODE } from './accounting-codes';
 import { payableStatusFromAmounts, remainingPayableAmount } from './accounting-journal.logic';
+import { purchaseIdFromGoodsApSource } from './goods-supplier-payable.logic';
 import {
   isApReclassSource,
   purchaseIdFromApReclassSource,
@@ -66,14 +67,17 @@ export function resolveJournalPurchaseId(
       ? journal.reversesSourceId
       : journal.sourceId;
 
+  const goodsApPurchaseId = sourceId ? purchaseIdFromGoodsApSource(sourceId) : null;
+  if (goodsApPurchaseId) return goodsApPurchaseId;
+
   if (type === 'PURCHASE_RECEIPT') {
-    return lookup.receipts.get(sourceId) ?? null;
+    return lookup.receipts.get(sourceId) ?? (lookup.purchaseIds.has(sourceId) ? sourceId : null);
   }
   if (type === 'PURCHASE') {
     return lookup.purchaseIds.has(sourceId) ? sourceId : null;
   }
   if (type === 'PURCHASE_PAYMENT') {
-    return lookup.purchasePayments.get(sourceId) ?? null;
+    return lookup.purchasePayments.get(sourceId) ?? (lookup.purchaseIds.has(sourceId) ? sourceId : null);
   }
   if (type === 'CARGO') {
     return (

@@ -331,4 +331,28 @@ describe('payable ledger sync vs finance dashboard', () => {
       ),
     ).toBe(PURCHASE_A);
   });
+
+  it('resolves older PURCHASE_RECEIPT journals whose sourceId is the purchaseId', () => {
+    expect(
+      resolveJournalPurchaseId(
+        { id: 'legacy', sourceType: 'PURCHASE_RECEIPT', sourceId: PURCHASE_A, postedAt: DAY1, lines: [] },
+        lookup(),
+      ),
+    ).toBe(PURCHASE_A);
+  });
+
+  it('resolves goods-ap backfill sourceId to the purchase', () => {
+    expect(
+      resolveJournalPurchaseId(
+        {
+          id: 'goods',
+          sourceType: 'PURCHASE',
+          sourceId: `goods-ap:${PURCHASE_A}`,
+          postedAt: DAY1,
+          lines: [],
+        },
+        lookup(),
+      ),
+    ).toBe(PURCHASE_A);
+  });
 });

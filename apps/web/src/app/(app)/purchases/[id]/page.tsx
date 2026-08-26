@@ -122,14 +122,16 @@ export default function PurchaseViewPage() {
           Статус:{' '}
           <Badge
             tone={
-              purchase.payableStatus === 'PAID'
+              (purchase.supplierPayableStatus ?? purchase.payableStatus) === 'PAID'
                 ? 'green'
-                : purchase.payableStatus === 'PARTIAL'
+                : (purchase.supplierPayableStatus ?? purchase.payableStatus) === 'PARTIAL'
                   ? 'amber'
                   : 'red'
             }
           >
-            {PAYABLE_STATUS_LABELS[purchase.payableStatus ?? 'UNPAID'] ?? purchase.payableStatus}
+            {PAYABLE_STATUS_LABELS[
+              purchase.supplierPayableStatus ?? purchase.payableStatus ?? 'UNPAID'
+            ] ?? purchase.supplierPayableStatus ?? purchase.payableStatus}
           </Badge>
         </p>
         {canPaySupplier ? (

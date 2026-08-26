@@ -12,7 +12,9 @@ import { buildBalanceSheet, buildProfitAndLoss, classifyJournalCashFlow } from '
 import { buildLogisticsApPaymentLines, buildLogisticsCostLines } from './logistics-cost.logic';
 import {
   buildApReclassLines,
+  buildApRestoreLines,
   planApReclassMove,
+  planSupplierApRestoreMove,
   splitPurchaseLandedCost,
   unpaidPurchaseObligations,
 } from './payable-classification.logic';
@@ -240,5 +242,43 @@ describe('supplier AP excludes logistics; cargo/transport AP stay separate', () 
     expect(moneyStr(unpaid.cargoUnpaidKgs)).toBe('40000.00');
     expect(moneyStr(unpaid.transportUnpaidKgs)).toBe('80000.00');
     expect(moneyStr(unpaid.totalUnpaidKgs)).toBe('420000.00');
+  });
+
+  it('restores unpaid goods from excess cargo/transport AP without touching inventory', () => {
+    const restorePlan = planSupplierApRestoreMove({
+      supplierRemainingKgs: '0',
+      cargoRemainingKgs: '100000',
+      chinaRemainingKgs: '50000',
+      kyrgyzstanRemainingKgs: '30000',
+      supplierTargetUnpaidKgs: '1000000',
+      cargoTargetUnpaidKgs: '100000',
+      chinaTargetUnpaidKgs: '50000',
+      kyrgyzstanTargetUnpaidKgs: '30000',
+    });
+    expect(moneyStr(restorePlan.fromCargoKgs)).toBe('0.00');
+    expect(moneyStr(restorePlan.fromChinaKgs)).toBe('0.00');
+
+    const mixedAway = planSupplierApRestoreMove({
+      supplierRemainingKgs: '0',
+      cargoRemainingKgs: '200000',
+      chinaRemainingKgs: '50000',
+      kyrgyzstanRemainingKgs: '30000',
+      supplierTargetUnpaidKgs: '100000',
+      cargoTargetUnpaidKgs: '100000',
+      chinaTargetUnpaidKgs: '50000',
+      kyrgyzstanTargetUnpaidKgs: '30000',
+    });
+    expect(moneyStr(mixedAway.fromCargoKgs)).toBe('100000.00');
+    const restore = buildApRestoreLines({ fromCargoKgs: '100000' });
+    const receipt = buildPurchaseReceiptLines({
+      goodsKgs: '1000000',
+      cargoKgs: '100000',
+    });
+    const posted = [...receipt, ...restore];
+    expect(debitNormalBalance(posted, ACCOUNT_CODE.INVENTORY).toFixed(2)).toBe(
+      debitNormalBalance(receipt, ACCOUNT_CODE.INVENTORY).toFixed(2),
+    );
+    expect(creditNormalBalance(restore, ACCOUNT_CODE.SUPPLIER_AP).toFixed(2)).toBe('100000.00');
+    expect(buildBalanceSheet(posted).differenceKgs).toBe('0.00');
   });
 });

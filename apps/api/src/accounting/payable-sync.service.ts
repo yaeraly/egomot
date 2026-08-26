@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { AccountingSourceType, PayableStatus } from '@prisma/client';
+import { AccountingSourceType, PayableStatus, PurchaseReceiptStatus, PurchaseStatus } from '@prisma/client';
 import { publicDecimal } from '../common/decimal.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { Decimal, moneyStr, roundMoney } from '../purchases/purchase-calc';
@@ -7,9 +7,19 @@ import { ACCOUNT_CODE } from './accounting-codes';
 import { AccountingService } from './accounting.service';
 import { payableStatusFromAmounts } from './accounting-journal.logic';
 import {
+  computeGoodsSupplierPayable,
+  isPurchaseReceivedForSupplierAp,
+  shouldBackfillSupplierPayable,
+  shouldRepairZeroedSupplierPayable,
+  sumVerifiedSupplierPaidKgs,
+} from './goods-supplier-payable.logic';
+import {
   apReclassSourceId,
+  apRestoreSourceId,
   buildApReclassLines,
+  buildApRestoreLines,
   planApReclassMove,
+  planSupplierApRestoreMove,
   unpaidPurchaseObligations,
 } from './payable-classification.logic';
 import {
@@ -55,11 +65,20 @@ export class PayableSyncService {
       await this.upsertLegacyTransportPayable(row);
     }
 
+    await this.backfillMissingGoodsSupplierPayables();
+
     return {
       supplierRemainingKgs: sumRemaining(supplier),
       cargoRemainingKgs: sumRemaining(cargo),
       transportRemainingKgs: sumRemaining(transport),
     };
+  }
+
+  async ensureGoodsSupplierPayable(purchaseId: string) {
+    await this.syncFromLedger();
+    return this.prisma.supplierPayable.findUnique({
+      where: { purchaseId },
+    });
   }
 
   async glBalances() {
@@ -108,9 +127,13 @@ export class PayableSyncService {
       const type = journal.sourceType === 'REVERSAL' ? journal.reversesSourceType : journal.sourceType;
       const sourceId = journal.sourceType === 'REVERSAL' ? journal.reversesSourceId : journal.sourceId;
       if (!type || !sourceId) continue;
-      if (type === 'PURCHASE_RECEIPT') receiptIds.push(sourceId);
-      else if (type === 'PURCHASE_PAYMENT') purchasePaymentIds.push(sourceId);
-      else if (type === 'CARGO_PAYMENT') {
+      if (type === 'PURCHASE_RECEIPT') {
+        receiptIds.push(sourceId);
+        maybePurchaseIds.push(sourceId);
+      } else if (type === 'PURCHASE_PAYMENT') {
+        purchasePaymentIds.push(sourceId);
+        maybePurchaseIds.push(sourceId);
+      } else if (type === 'CARGO_PAYMENT') {
         cargoPaymentIds.push(sourceId);
         logisticsPaymentIds.push(sourceId);
       } else if (type === 'CARGO' || type === 'PURCHASE') {
@@ -276,6 +299,174 @@ export class PayableSyncService {
         actor.id,
       );
     }
+
+    await this.restoreSupplierApFromLogisticsExcess(actor.id);
+  }
+
+  private async restoreSupplierApFromLogisticsExcess(createdByUserId: string) {
+    const journals = await this.loadApJournals();
+    if (journals.length === 0) return;
+    const lookup = await this.buildLookup(journals);
+    const purchaseIds = new Set<string>();
+    for (const journal of journals) {
+      const purchaseId = resolveJournalPurchaseId(journal, lookup);
+      if (purchaseId) purchaseIds.add(purchaseId);
+    }
+    if (purchaseIds.size === 0) return;
+
+    const purchases = await this.prisma.purchase.findMany({
+      where: { id: { in: [...purchaseIds] } },
+      include: { logistics: true, purchasePayments: true },
+    });
+    const supplierRows = aggregateSupplierApByPurchase(journals, lookup);
+    const cargoRows = aggregateCargoApByPurchase(journals, lookup);
+    const transportRows = aggregateTransportApByPurchaseAndType(journals, lookup);
+
+    for (const purchase of purchases) {
+      const goodsPaid = roundMoney(
+        purchase.purchasePayments
+          .reduce((sum, row) => sum.plus(roundMoney(row.amountKgs)), roundMoney(0))
+          .plus(this.receiptGoodsCashPaid(journals, lookup, purchase.id)),
+      );
+      const target = unpaidPurchaseObligations({
+        goodsKgs: purchase.totalPurchaseCostKgs,
+        chinaTransportKgs: this.costForLogisticsType(
+          purchase,
+          'CHINA_INTERNAL_TRANSPORT',
+          purchase.totalChinaTransportKgs,
+        ),
+        cargoKgs: this.costForLogisticsType(purchase, 'CARGO', purchase.totalCargoKgs),
+        kyrgyzstanTransportKgs: this.costForLogisticsType(
+          purchase,
+          'KYRGYZSTAN_INTERNAL_TRANSPORT',
+          purchase.totalKgInternalTransportKgs,
+        ),
+        goodsPaidKgs: goodsPaid,
+        chinaPaidKgs: this.paidForLogisticsType(purchase, 'CHINA_INTERNAL_TRANSPORT'),
+        cargoPaidKgs: this.paidForLogisticsType(purchase, 'CARGO'),
+        kyrgyzstanPaidKgs: this.paidForLogisticsType(purchase, 'KYRGYZSTAN_INTERNAL_TRANSPORT'),
+      });
+      const restore = planSupplierApRestoreMove({
+        supplierRemainingKgs:
+          supplierRows.find((row) => row.purchaseId === purchase.id)?.remainingKgs ?? 0,
+        cargoRemainingKgs:
+          cargoRows.find((row) => row.purchaseId === purchase.id)?.remainingKgs ?? 0,
+        chinaRemainingKgs:
+          transportRows.find(
+            (row) =>
+              row.purchaseId === purchase.id && row.type === 'CHINA_INTERNAL_TRANSPORT',
+          )?.remainingKgs ?? 0,
+        kyrgyzstanRemainingKgs:
+          transportRows.find(
+            (row) =>
+              row.purchaseId === purchase.id && row.type === 'KYRGYZSTAN_INTERNAL_TRANSPORT',
+          )?.remainingKgs ?? 0,
+        supplierTargetUnpaidKgs: target.supplierUnpaidKgs,
+        cargoTargetUnpaidKgs: target.cargoUnpaidKgs,
+        chinaTargetUnpaidKgs: target.chinaUnpaidKgs,
+        kyrgyzstanTargetUnpaidKgs: target.kyrgyzstanUnpaidKgs,
+      });
+      await this.postApRestore(purchase.id, 'CARGO', restore.fromCargoKgs, createdByUserId);
+      await this.postApRestore(
+        purchase.id,
+        'CHINA_INTERNAL_TRANSPORT',
+        restore.fromChinaKgs,
+        createdByUserId,
+      );
+      await this.postApRestore(
+        purchase.id,
+        'KYRGYZSTAN_INTERNAL_TRANSPORT',
+        restore.fromKyrgyzstanKgs,
+        createdByUserId,
+      );
+    }
+  }
+
+  private async backfillMissingGoodsSupplierPayables() {
+    const purchases = await this.prisma.purchase.findMany({
+      where: {
+        OR: [
+          { status: { in: [PurchaseStatus.RECEIVED, PurchaseStatus.RECEIVED_WITH_DISCREPANCY] } },
+          { receipts: { some: { status: PurchaseReceiptStatus.COMPLETED } } },
+        ],
+      },
+      include: {
+        supplierPayables: true,
+        purchasePayments: true,
+        receipts: { select: { status: true } },
+        logistics: true,
+      },
+    });
+    const journals = await this.loadApJournals();
+    const lookup = await this.buildLookup(journals);
+
+    for (const purchase of purchases) {
+      const received = isPurchaseReceivedForSupplierAp(
+        purchase.status,
+        purchase.receipts.some((row) => row.status === PurchaseReceiptStatus.COMPLETED),
+      );
+      const paid = sumVerifiedSupplierPaidKgs({
+        purchasePaymentKgs: purchase.purchasePayments.map((row) => row.amountKgs),
+        paidAtReceiptKgs: this.receiptGoodsCashPaid(journals, lookup, purchase.id),
+      });
+      const amounts = computeGoodsSupplierPayable({
+        goodsKgs: purchase.totalPurchaseCostKgs,
+        verifiedSupplierPaidKgs: paid,
+        chinaTransportKgs: this.costForLogisticsType(
+          purchase,
+          'CHINA_INTERNAL_TRANSPORT',
+          purchase.totalChinaTransportKgs,
+        ),
+        cargoKgs: this.costForLogisticsType(purchase, 'CARGO', purchase.totalCargoKgs),
+        kyrgyzstanTransportKgs: this.costForLogisticsType(
+          purchase,
+          'KYRGYZSTAN_INTERNAL_TRANSPORT',
+          purchase.totalKgInternalTransportKgs,
+        ),
+      });
+      const existing = purchase.supplierPayables[0] ?? null;
+      const backfill = shouldBackfillSupplierPayable({
+        existingCount: purchase.supplierPayables.length,
+        received,
+        remainingAmountKgs: amounts.remainingAmountKgs,
+      });
+      const repair =
+        Boolean(existing) &&
+        shouldRepairZeroedSupplierPayable({
+          existingRemainingKgs: existing?.remainingAmountKgs ?? 0,
+          goodsRemainingKgs: amounts.remainingAmountKgs,
+        });
+      if (!backfill && !repair) continue;
+      if (existing && roundMoney(existing.remainingAmountKgs).gt(0)) continue;
+
+      const amountKgs = moneyStr(amounts.amountKgs);
+      const paidAmountKgs = moneyStr(amounts.paidAmountKgs);
+      const remainingAmountKgs = moneyStr(amounts.remainingAmountKgs);
+      const status = amounts.status as PayableStatus;
+
+      if (existing) {
+        await this.prisma.supplierPayable.update({
+          where: { id: existing.id },
+          data: { amountKgs, paidAmountKgs, remainingAmountKgs, status },
+        });
+      } else {
+        const already = await this.prisma.supplierPayable.findUnique({
+          where: { purchaseId: purchase.id },
+        });
+        if (already) continue;
+        await this.prisma.supplierPayable.create({
+          data: {
+            supplierId: purchase.supplierId,
+            purchaseId: purchase.id,
+            amountKgs,
+            paidAmountKgs,
+            remainingAmountKgs,
+            status,
+          },
+        });
+      }
+      await this.accounting.syncPurchaseSettlement(this.prisma, purchase.id);
+    }
   }
 
   private receiptGoodsCashPaid(
@@ -341,6 +532,29 @@ export class PayableSyncService {
       sourceType: AccountingSourceType.AP_RECLASS,
       sourceId: apReclassSourceId(purchaseId, kind),
       memo: 'Reclass supplier AP to logistics AP',
+      lines,
+      createdByUserId,
+    });
+  }
+
+  private async postApRestore(
+    purchaseId: string,
+    kind: 'CARGO' | 'CHINA_INTERNAL_TRANSPORT' | 'KYRGYZSTAN_INTERNAL_TRANSPORT',
+    amount: Decimal,
+    createdByUserId: string,
+  ) {
+    const qty = roundMoney(amount);
+    if (!qty.gt(0)) return;
+    const lines =
+      kind === 'CARGO'
+        ? buildApRestoreLines({ fromCargoKgs: qty })
+        : kind === 'CHINA_INTERNAL_TRANSPORT'
+          ? buildApRestoreLines({ fromChinaKgs: qty })
+          : buildApRestoreLines({ fromKyrgyzstanKgs: qty });
+    await this.accounting.postJournal({
+      sourceType: AccountingSourceType.AP_RECLASS,
+      sourceId: apRestoreSourceId(purchaseId, kind),
+      memo: 'Restore supplier AP from logistics AP',
       lines,
       createdByUserId,
     });
