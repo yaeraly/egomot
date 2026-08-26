@@ -9,6 +9,21 @@ export function money(value: string | number | null | undefined, currency?: stri
   return currency ? `${formatted} ${currency}` : formatted;
 }
 
+/** Finance UI amount. Internal currency remains KGS; user-facing label is сом. */
+export function moneySom(value: string | number | null | undefined): string {
+  return money(value, 'сом');
+}
+
+export function formatFinancePeriodKey(key: string | undefined): string {
+  if (!key || key === 'range') return 'За период';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(key)) return formatBusinessDate(key);
+  if (/^\d{4}-\d{2}$/.test(key)) {
+    const [year, month] = key.split('-');
+    return `${month}.${year}`;
+  }
+  return key;
+}
+
 export function qty(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === '') return '—';
   const n = typeof value === 'number' ? value : Number(value);

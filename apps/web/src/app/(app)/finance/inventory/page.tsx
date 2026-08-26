@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { money, qty } from '@/lib/format';
+import { moneySom, qty } from '@/lib/format';
 import { Card, PageHeader } from '@/components/ui';
 
 interface InventoryValuation {
@@ -27,10 +27,10 @@ export default function InventoryValuationPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Оценка склада" subtitle="Количество × WAC. FIFO не используется." />
+      <PageHeader title="Стоимость товаров на складе" subtitle="Количество × средняя себестоимость (WAC). FIFO не используется." />
       <Card>
-        <p className="text-sm text-muted">Стоимость склада</p>
-        <p className="text-3xl font-bold">{data ? money(data.totalValueKgs, 'KGS') : '—'}</p>
+        <p className="text-sm text-muted">Стоимость товаров на складе</p>
+        <p className="text-3xl font-bold">{data ? moneySom(data.totalValueKgs) : '—'}</p>
       </Card>
       {(data?.rows ?? []).map((row) => (
         <Card key={row.productId} className="flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -45,11 +45,11 @@ export default function InventoryValuationPage() {
             </div>
             <div>
               <p className="text-muted">WAC</p>
-              <p>{money(row.averageUnitCostKgs, 'KGS')}</p>
+              <p>{moneySom(row.averageUnitCostKgs)}</p>
             </div>
             <div>
               <p className="text-muted">Сумма</p>
-              <p>{money(row.totalValueKgs, 'KGS')}</p>
+              <p>{moneySom(row.totalValueKgs)}</p>
             </div>
           </div>
         </Card>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { money } from '@/lib/format';
+import { formatBusinessDate, moneySom } from '@/lib/format';
 import { Card, PageHeader } from '@/components/ui';
 import { FinanceRangeBar, useFinanceQuery } from '@/components/FinanceRange';
 
@@ -18,7 +18,6 @@ interface BalanceSheetReport {
   liabilities: {
     supplierApKgs: string;
     cargoApKgs: string;
-    otherPayablesKgs: string;
     totalLiabilitiesKgs: string;
   };
   equity: {
@@ -41,7 +40,12 @@ export default function BalanceSheetPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Баланс" subtitle="Assets = Liabilities + Equity. Разница должна быть 0.00" />
+      <PageHeader
+        title="Баланс"
+        subtitle={`Активы = Обязательства + Капитал. На дату ${
+          data ? formatBusinessDate(data.asOf) : '—'
+        }`}
+      />
       <FinanceRangeBar
         preset={range.preset}
         from={range.from}
@@ -52,32 +56,35 @@ export default function BalanceSheetPage() {
       />
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         <Card className="space-y-2">
-          <p className="font-semibold">Assets</p>
-          <Row k="Cash" v={data?.assets.cashKgs} />
-          <Row k="Bank" v={data?.assets.bankKgs} />
-          <Row k="Accounts Receivable" v={data?.assets.accountsReceivableKgs} />
-          <Row k="Inventory" v={data?.assets.inventoryKgs} />
-          <Row k="Total" v={data?.assets.totalAssetsKgs} />
+          <p className="font-semibold">АКТИВЫ</p>
+          <Row k="Наличные" v={data?.assets.cashKgs} />
+          <Row k="Банк" v={data?.assets.bankKgs} />
+          <Row k="Дебиторская задолженность" v={data?.assets.accountsReceivableKgs} />
+          <Row k="Товары на складе" v={data?.assets.inventoryKgs} />
+          <Row k="Итого активы" v={data?.assets.totalAssetsKgs} strong />
         </Card>
         <Card className="space-y-2">
-          <p className="font-semibold">Liabilities</p>
-          <Row k="Supplier AP" v={data?.liabilities.supplierApKgs} />
-          <Row k="Cargo AP" v={data?.liabilities.cargoApKgs} />
-          <Row k="Other Payables" v={data?.liabilities.otherPayablesKgs} />
-          <Row k="Total" v={data?.liabilities.totalLiabilitiesKgs} />
+          <p className="font-semibold">ОБЯЗАТЕЛЬСТВА</p>
+          <Row k="Долг поставщикам" v={data?.liabilities.supplierApKgs} />
+          <Row k="Долг за карго" v={data?.liabilities.cargoApKgs} />
+          <Row k="Итого обязательства" v={data?.liabilities.totalLiabilitiesKgs} strong />
         </Card>
         <Card className="space-y-2">
-          <p className="font-semibold">Equity</p>
-          <Row k="Investor Capital" v={data?.equity.investorCapitalKgs} />
-          <Row k="Retained Earnings" v={data?.equity.retainedEarningsKgs} />
-          <Row k="− Owner Drawings" v={data?.equity.ownerDrawingsKgs} />
-          <Row k="Total" v={data?.equity.totalEquityKgs} />
+          <p className="font-semibold">КАПИТАЛ</p>
+          <Row k="Капитал инвестора" v={data?.equity.investorCapitalKgs} />
+          <Row k="Нераспределённая прибыль" v={data?.equity.retainedEarningsKgs} />
+          <Row k="Изъятия владельца" v={data?.equity.ownerDrawingsKgs} />
+          <Row k="Итого капитал" v={data?.equity.totalEquityKgs} strong />
         </Card>
       </div>
       {data ? (
-        <Card>
+        <Card className="space-y-1">
           <p className="text-sm">
-            Разница: <span className="font-semibold">{money(data.differenceKgs, 'KGS')}</span>
+            Активы = Обязательства + Капитал:{' '}
+            <span className="font-semibold">{moneySom(data.liabilitiesPlusEquityKgs)}</span>
+          </p>
+          <p className="text-sm">
+            Разница: <span className="font-semibold">{moneySom(data.differenceKgs)}</span>
           </p>
         </Card>
       ) : null}
@@ -85,11 +92,11 @@ export default function BalanceSheetPage() {
   );
 }
 
-function Row({ k, v }: { k: string; v?: string }) {
+function Row({ k, v, strong }: { k: string; v?: string; strong?: boolean }) {
   return (
-    <div className="flex justify-between gap-3 text-sm">
-      <span className="text-muted">{k}</span>
-      <span className="font-medium">{v ? money(v, 'KGS') : '—'}</span>
+    <div className={`flex justify-between gap-3 text-sm ${strong ? 'font-semibold' : ''}`}>
+      <span className={strong ? '' : 'text-muted'}>{k}</span>
+      <span>{v === undefined ? '—' : moneySom(v)}</span>
     </div>
   );
 }

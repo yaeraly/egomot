@@ -14,8 +14,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { dec, moneyStr, roundMoney } from '../purchases/purchase-calc';
 import {
   ACCOUNT_CODE,
-  OPENING_INVESTOR_CAPITAL_KGS,
-  OPENING_INVESTOR_CAPITAL_SOURCE_ID,
   glCashAccountCodeForPaymentMethod,
   type AccountCode,
 } from './accounting-codes';
@@ -23,7 +21,6 @@ import {
   InvalidJournalLineError,
   UnbalancedJournalError,
   buildDebtCollectionLines,
-  buildOpeningInvestorCapitalLines,
   buildPurchaseReceiptLines,
   buildSaleLines,
   payableStatusFromAmounts,
@@ -33,6 +30,7 @@ import {
   type JournalLineDraft,
 } from './accounting-journal.logic';
 import {
+  persistOpeningInvestorCapital,
   persistPostedJournal,
   type PersistJournalInput,
 } from './accounting-journal.store';
@@ -109,17 +107,7 @@ export class AccountingService {
     createdByUserId: string,
     db: AccountingClient = this.prisma,
   ) {
-    const lines = buildOpeningInvestorCapitalLines(OPENING_INVESTOR_CAPITAL_KGS);
-    return this.postJournal(
-      {
-        sourceType: AccountingSourceType.OPENING_BALANCE,
-        sourceId: OPENING_INVESTOR_CAPITAL_SOURCE_ID,
-        memo: 'Opening investor capital',
-        lines,
-        createdByUserId,
-      },
-      db,
-    );
+    return persistOpeningInvestorCapital(db, createdByUserId);
   }
 
   async voidAndReverse(

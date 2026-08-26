@@ -5,7 +5,13 @@ import {
   type PrismaClient,
 } from '@prisma/client';
 import {
+  OPENING_INVESTOR_CAPITAL_KGS,
+  OPENING_INVESTOR_CAPITAL_SOURCE_ID,
+  openingInvestorCapitalPostedAt,
+} from './accounting-codes';
+import {
   InvalidJournalLineError,
+  buildOpeningInvestorCapitalLines,
   formatJournalNumber,
   validateJournalLines,
   type JournalLineDraft,
@@ -87,6 +93,32 @@ export async function persistPostedJournal(db: AccountingDb, input: PersistJourn
       },
     },
     include: { lines: { include: { account: true }, orderBy: { sortOrder: 'asc' } } },
+  });
+}
+
+const openingJournalInclude = {
+  lines: { include: { account: true }, orderBy: { sortOrder: 'asc' as const } },
+};
+
+export async function persistOpeningInvestorCapital(db: AccountingDb, createdByUserId: string) {
+  const postedAt = openingInvestorCapitalPostedAt();
+  const journal = await persistPostedJournal(db, {
+    sourceType: AccountingSourceType.OPENING_BALANCE,
+    sourceId: OPENING_INVESTOR_CAPITAL_SOURCE_ID,
+    memo: 'Opening investor capital',
+    lines: buildOpeningInvestorCapitalLines(OPENING_INVESTOR_CAPITAL_KGS),
+    createdByUserId,
+    postedAt,
+  });
+  const currentPostedAt =
+    journal.postedAt instanceof Date ? journal.postedAt : new Date(journal.postedAt);
+  if (currentPostedAt.getTime() === postedAt.getTime()) {
+    return journal;
+  }
+  return db.journal.update({
+    where: { id: journal.id },
+    data: { postedAt },
+    include: openingJournalInclude,
   });
 }
 

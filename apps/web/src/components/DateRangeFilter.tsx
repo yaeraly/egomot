@@ -10,6 +10,7 @@ export function DateRangeFilter({
   onPresetChange,
   onFromChange,
   onToChange,
+  presets = DATE_PRESETS,
 }: {
   preset: DatePresetValue;
   from: string;
@@ -17,12 +18,13 @@ export function DateRangeFilter({
   onPresetChange: (value: DatePresetValue) => void;
   onFromChange: (value: string) => void;
   onToChange: (value: string) => void;
+  presets?: ReadonlyArray<{ value: DatePresetValue; label: string }>;
 }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
       <Field label="Период">
         <Select value={preset} onChange={(e) => onPresetChange(e.target.value as DatePresetValue)}>
-          {DATE_PRESETS.map((item) => (
+          {presets.map((item) => (
             <option key={item.value} value={item.value}>
               {item.label}
             </option>

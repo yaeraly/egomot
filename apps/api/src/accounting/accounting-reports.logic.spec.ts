@@ -1,7 +1,9 @@
 import {
   ACCOUNT_CODE,
   OPENING_INVESTOR_CAPITAL_KGS,
+  OPENING_INVESTOR_CAPITAL_POSTED_ON,
   OPERATIONAL_WALLET_STATED_KGS,
+  openingInvestorCapitalPostedAt,
 } from './accounting-codes';
 import {
   buildCargoPayableLines,
@@ -24,6 +26,8 @@ import {
   buildFinanceDashboard,
   buildProfitAndLoss,
   classifyJournalCashFlow,
+  flattenJournalLines,
+  linesOnOrBefore,
   type PostedReportJournal,
 } from './accounting-reports.logic';
 import { moneyStr } from '../purchases/purchase-calc';
@@ -301,5 +305,72 @@ describe('clean accounting rebuild validation scenario', () => {
     expect(dashboard.salesRevenueKgs).toBe('0.00');
     expect(dashboard.cogsKgs).toBe('0.00');
     expect(dashboard.balanceDifferenceKgs).toBe('0.00');
+  });
+});
+
+describe('opening investor capital business date 2026-05-01', () => {
+  const postedAt = openingInvestorCapitalPostedAt();
+  const opening = journal(postedAt, buildOpeningInvestorCapitalLines(), 'OPENING_BALANCE');
+  const april30 = new Date('2026-04-30T23:59:59.999Z');
+  const may1Start = new Date('2026-05-01T00:00:00.000Z');
+  const may1End = new Date('2026-05-01T23:59:59.999Z');
+  const may2Start = new Date('2026-05-02T00:00:00.000Z');
+  const may31 = new Date('2026-05-31T23:59:59.999Z');
+
+  it('uses 2026-05-01 as the opening capital date', () => {
+    expect(OPENING_INVESTOR_CAPITAL_POSTED_ON).toBe('2026-05-01');
+    expect(postedAt.toISOString()).toBe('2026-05-01T00:00:00.000Z');
+  });
+
+  it('includes investor contribution in ДДС on 01.05.2026', () => {
+    const dds = buildCashFlowStatement({
+      journals: [opening],
+      from: may1Start,
+      to: may1End,
+      groupBy: 'day',
+    });
+    expect(dds.openingCashKgs).toBe('0.00');
+    expect(dds.investorContributionsKgs).toBe(OPENING_INVESTOR_CAPITAL_KGS);
+    expect(dds.closingCashKgs).toBe(OPENING_INVESTOR_CAPITAL_KGS);
+    expect(dds.periods).toHaveLength(1);
+    expect(dds.periods[0].key).toBe('2026-05-01');
+    expect(dds.periods[0].investorContributionsKgs).toBe(OPENING_INVESTOR_CAPITAL_KGS);
+  });
+
+  it('does not treat investor capital as a period inflow before 01.05.2026', () => {
+    const dds = buildCashFlowStatement({
+      journals: [opening],
+      from: new Date('2026-04-01T00:00:00.000Z'),
+      to: april30,
+    });
+    expect(dds.investorContributionsKgs).toBe('0.00');
+    expect(dds.openingCashKgs).toBe('0.00');
+    expect(dds.closingCashKgs).toBe('0.00');
+  });
+
+  it('moves investor capital into opening cash after 01.05.2026', () => {
+    const dds = buildCashFlowStatement({
+      journals: [opening],
+      from: may2Start,
+      to: may31,
+    });
+    expect(dds.openingCashKgs).toBe(OPENING_INVESTOR_CAPITAL_KGS);
+    expect(dds.investorContributionsKgs).toBe('0.00');
+    expect(dds.closingCashKgs).toBe(OPENING_INVESTOR_CAPITAL_KGS);
+  });
+
+  it('balance sheet as of 30.04.2026 does not include opening capital', () => {
+    const sheet = buildBalanceSheet(linesOnOrBefore(flattenJournalLines([opening]), april30));
+    expect(sheet.assets.cashKgs).toBe('0.00');
+    expect(sheet.equity.investorCapitalKgs).toBe('0.00');
+    expect(sheet.differenceKgs).toBe('0.00');
+  });
+
+  it('balance sheet as of 01.05.2026 includes cash and investor capital', () => {
+    const sheet = buildBalanceSheet(linesOnOrBefore(flattenJournalLines([opening]), may1End));
+    expect(sheet.assets.cashKgs).toBe(OPENING_INVESTOR_CAPITAL_KGS);
+    expect(sheet.assets.bankKgs).toBe('0.00');
+    expect(sheet.equity.investorCapitalKgs).toBe(OPENING_INVESTOR_CAPITAL_KGS);
+    expect(sheet.differenceKgs).toBe('0.00');
   });
 });

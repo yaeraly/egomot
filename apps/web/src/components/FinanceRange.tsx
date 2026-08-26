@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { DateRangeFilter, defaultCustomRange } from '@/components/DateRangeFilter';
-import { DatePresetValue } from '@/lib/date';
+import { DatePresetValue, FINANCE_DATE_PRESETS } from '@/lib/date';
 
 export function useFinanceQuery(defaultPreset: DatePresetValue = 'month') {
   const [preset, setPreset] = useState<DatePresetValue>(defaultPreset);
@@ -53,6 +53,7 @@ export function FinanceRangeBar({
       onPresetChange={setPreset}
       onFromChange={setFrom}
       onToChange={setTo}
+      presets={FINANCE_DATE_PRESETS}
     />
   );
 }

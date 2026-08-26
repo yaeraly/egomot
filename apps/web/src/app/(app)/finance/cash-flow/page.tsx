@@ -2,13 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { money } from '@/lib/format';
+import { formatFinancePeriodKey, moneySom } from '@/lib/format';
 import { Card, PageHeader, Select } from '@/components/ui';
 import { FinanceRangeBar, useFinanceQuery } from '@/components/FinanceRange';
 
-interface CashFlowReport {
-  range: { from: string; to: string; groupBy: string };
-  openingCashKgs: string;
+interface CashFlowBuckets {
   investorContributionsKgs: string;
   cashSalesKgs: string;
   customerCollectionsKgs: string;
@@ -23,14 +21,29 @@ interface CashFlowReport {
   totalCashInKgs: string;
   totalCashOutKgs: string;
   netCashKgs: string;
+}
+
+interface CashFlowReport extends CashFlowBuckets {
+  range: { from: string; to: string; groupBy: string };
+  openingCashKgs: string;
   closingCashKgs: string;
   glClosingCashKgs: string;
   differenceKgs: string;
+  periods: Array<CashFlowBuckets & { key: string }>;
+}
+
+function Row({ label, value, strong }: { label: string; value?: string; strong?: boolean }) {
+  return (
+    <div className={`flex justify-between gap-3 text-sm ${strong ? 'font-semibold' : ''}`}>
+      <span className={strong ? '' : 'text-muted'}>{label}</span>
+      <span>{value === undefined ? '—' : moneySom(value)}</span>
+    </div>
+  );
 }
 
 export default function CashFlowPage() {
   const range = useFinanceQuery('month');
-  const [groupBy, setGroupBy] = useState('range');
+  const [groupBy, setGroupBy] = useState('day');
   const [data, setData] = useState<CashFlowReport | null>(null);
 
   useEffect(() => {
@@ -38,25 +51,12 @@ export default function CashFlowPage() {
     void api<CashFlowReport>(`/accounting/reports/cash-flow${extra}`).then(setData);
   }, [range.query, groupBy]);
 
-  const rows: Array<[string, string | undefined]> = [
-    ['Opening Cash', data?.openingCashKgs],
-    ['+ Investor / Owner contributions', data?.investorContributionsKgs],
-    ['+ Cash Sales', data?.cashSalesKgs],
-    ['+ Customer debt collections', data?.customerCollectionsKgs],
-    ['+ Other Cash In', data?.otherCashInKgs],
-    ['− Supplier Payments', data?.supplierPaymentsKgs],
-    ['− Cargo Payments', data?.cargoPaymentsKgs],
-    ['− Warehouse Rent', data?.warehouseRentKgs],
-    ['− Stationery', data?.stationeryKgs],
-    ['− Owner Salary', data?.ownerSalaryKgs],
-    ['− Owner Withdrawals', data?.ownerWithdrawalsKgs],
-    ['− Other Cash Out', data?.otherCashOutKgs],
-    ['= Closing Cash', data?.closingCashKgs],
-  ];
-
   return (
     <div className="space-y-4">
-      <PageHeader title="ДДС" subtitle="Движение денежных средств по счетам Cash и Bank" />
+      <PageHeader
+        title="ДДС — Отчёт о движении денежных средств"
+        subtitle="Поступления и выплаты по счетам Наличные и Банк. Это не НДС."
+      />
       <FinanceRangeBar
         preset={range.preset}
         from={range.from}
@@ -71,17 +71,73 @@ export default function CashFlowPage() {
         <option value="month">По месяцам</option>
       </Select>
       <Card className="space-y-2">
-        {rows.map(([label, value]) => (
-          <div key={label} className="flex justify-between gap-3 text-sm">
-            <span className="text-muted">{label}</span>
-            <span className="font-medium">{value ? money(value, 'KGS') : '—'}</span>
-          </div>
-        ))}
+        <Row label="Остаток на начало периода" value={data?.openingCashKgs} strong />
+        <p className="pt-2 text-sm font-semibold">+ Поступления</p>
+        <Row label="Вклад инвестора" value={data?.investorContributionsKgs} />
+        <Row label="Продажи" value={data?.cashSalesKgs} />
+        <Row label="Погашение долгов клиентов" value={data?.customerCollectionsKgs} />
+        {data && Number(data.otherCashInKgs) !== 0 ? (
+          <Row label="Прочие поступления" value={data.otherCashInKgs} />
+        ) : null}
+        <Row label="Итого поступления" value={data?.totalCashInKgs} />
+        <p className="pt-2 text-sm font-semibold">− Выплаты</p>
+        <Row label="Оплата поставщикам" value={data?.supplierPaymentsKgs} />
+        <Row label="Оплата карго" value={data?.cargoPaymentsKgs} />
+        <Row label="Аренда склада" value={data?.warehouseRentKgs} />
+        <Row label="Канцтовары" value={data?.stationeryKgs} />
+        <Row label="Зарплата владельца" value={data?.ownerSalaryKgs} />
+        <Row label="Изъятие владельца" value={data?.ownerWithdrawalsKgs} />
+        <Row label="Прочие расходы" value={data?.otherCashOutKgs} />
+        <Row label="Итого выплаты" value={data?.totalCashOutKgs} />
+        <Row label="= Остаток на конец периода" value={data?.closingCashKgs} strong />
       </Card>
+      {data?.periods?.length ? (
+        <div className="space-y-3">
+          {data.periods.map((period) => (
+            <Card key={period.key} className="space-y-1">
+              <p className="font-semibold">{formatFinancePeriodKey(period.key)}</p>
+              {Number(period.investorContributionsKgs) !== 0 ? (
+                <p className="text-sm">
+                  Вклад инвестора — {moneySom(period.investorContributionsKgs)}
+                </p>
+              ) : null}
+              {Number(period.cashSalesKgs) !== 0 ? (
+                <p className="text-sm">Продажи — {moneySom(period.cashSalesKgs)}</p>
+              ) : null}
+              {Number(period.customerCollectionsKgs) !== 0 ? (
+                <p className="text-sm">
+                  Погашение долгов клиентов — {moneySom(period.customerCollectionsKgs)}
+                </p>
+              ) : null}
+              {Number(period.supplierPaymentsKgs) !== 0 ? (
+                <p className="text-sm">Оплата поставщикам — {moneySom(period.supplierPaymentsKgs)}</p>
+              ) : null}
+              {Number(period.cargoPaymentsKgs) !== 0 ? (
+                <p className="text-sm">Оплата карго — {moneySom(period.cargoPaymentsKgs)}</p>
+              ) : null}
+              {Number(period.warehouseRentKgs) !== 0 ? (
+                <p className="text-sm">Аренда склада — {moneySom(period.warehouseRentKgs)}</p>
+              ) : null}
+              {Number(period.stationeryKgs) !== 0 ? (
+                <p className="text-sm">Канцтовары — {moneySom(period.stationeryKgs)}</p>
+              ) : null}
+              {Number(period.ownerSalaryKgs) !== 0 ? (
+                <p className="text-sm">Зарплата владельца — {moneySom(period.ownerSalaryKgs)}</p>
+              ) : null}
+              {Number(period.ownerWithdrawalsKgs) !== 0 ? (
+                <p className="text-sm">Изъятие владельца — {moneySom(period.ownerWithdrawalsKgs)}</p>
+              ) : null}
+              {Number(period.otherCashOutKgs) !== 0 ? (
+                <p className="text-sm">Прочие расходы — {moneySom(period.otherCashOutKgs)}</p>
+              ) : null}
+            </Card>
+          ))}
+        </div>
+      ) : null}
       {data ? (
         <p className="text-sm text-muted">
-          Closing vs GL Cash/Bank: {money(data.glClosingCashKgs, 'KGS')} · разница{' '}
-          {money(data.differenceKgs, 'KGS')}
+          Остаток по счетам Наличные и Банк: {moneySom(data.glClosingCashKgs)} · разница{' '}
+          {moneySom(data.differenceKgs)}
         </p>
       ) : null}
     </div>

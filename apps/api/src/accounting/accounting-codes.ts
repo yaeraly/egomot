@@ -77,6 +77,12 @@ export type OperatingExpenseCategoryCode = keyof typeof EXPENSE_CATEGORY_ACCOUNT
 /** Known opening investor capital. This is the only historical finance amount posted in phase 1. */
 export const OPENING_INVESTOR_CAPITAL_KGS = '2584712.00';
 export const OPENING_INVESTOR_CAPITAL_SOURCE_ID = 'INVESTOR_CAPITAL';
+/** Actual investor capital receipt date. Posted journals must use this business date. */
+export const OPENING_INVESTOR_CAPITAL_POSTED_ON = '2026-05-01';
+
+export function openingInvestorCapitalPostedAt(): Date {
+  return new Date(`${OPENING_INVESTOR_CAPITAL_POSTED_ON}T00:00:00.000Z`);
+}
 
 /** Operational employee-wallet total. Not company cash and never used as a GL plug. */
 export const OPERATIONAL_WALLET_STATED_KGS = '9167215.00';

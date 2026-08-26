@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
-import { formatBusinessDate, money } from '@/lib/format';
+import { formatBusinessDate, moneySom } from '@/lib/format';
 import { todayInputValue } from '@/lib/date';
 import { Button, Card, ErrorText, Field, Input, PageHeader, Select, Textarea } from '@/components/ui';
+import { chartAccountLabel, companyAccountLabel } from '@/lib/finance-labels';
 
 interface CompanyAccount {
   id: string;
@@ -30,10 +31,10 @@ interface WithdrawalRow {
 }
 
 const CATEGORIES = [
-  ['WAREHOUSE_RENT', 'Warehouse Rent'],
-  ['STATIONERY', 'Stationery'],
-  ['OWNER_SALARY', 'Owner Salary'],
-  ['OTHER', 'Other'],
+  ['WAREHOUSE_RENT', 'Аренда склада'],
+  ['STATIONERY', 'Канцтовары'],
+  ['OWNER_SALARY', 'Зарплата владельца'],
+  ['OTHER', 'Прочие операционные расходы'],
 ] as const;
 
 export default function ExpensesPage() {
@@ -136,7 +137,7 @@ export default function ExpensesPage() {
           <Field label="Счёт компании">
             <Select value={form.paymentAccountId} onChange={(e) => setForm((s) => ({ ...s, paymentAccountId: e.target.value }))}>
               {accounts.map((account) => (
-                <option key={account.id} value={account.id}>{account.name}</option>
+                <option key={account.id} value={account.id}>{companyAccountLabel(account)}</option>
               ))}
             </Select>
           </Field>
@@ -159,7 +160,7 @@ export default function ExpensesPage() {
           <Field label="Счёт компании">
             <Select value={withdrawal.paymentAccountId} onChange={(e) => setWithdrawal((s) => ({ ...s, paymentAccountId: e.target.value }))}>
               {accounts.map((account) => (
-                <option key={account.id} value={account.id}>{account.name}</option>
+                <option key={account.id} value={account.id}>{companyAccountLabel(account)}</option>
               ))}
             </Select>
           </Field>
@@ -175,15 +176,15 @@ export default function ExpensesPage() {
       <div className="space-y-3">
         {expenses.map((row) => (
           <Card key={row.id} className="space-y-1 text-sm">
-            <p className="font-semibold">{row.accountName}</p>
-            <p>{formatBusinessDate(row.expenseDate)} · {money(row.amountKgs, 'KGS')}</p>
+            <p className="font-semibold">{chartAccountLabel(row.accountCode, row.accountName)}</p>
+            <p>{formatBusinessDate(row.expenseDate)} · {moneySom(row.amountKgs)}</p>
             <p className="text-muted">{row.description}</p>
           </Card>
         ))}
         {withdrawals.map((row) => (
           <Card key={row.id} className="space-y-1 text-sm">
-            <p className="font-semibold">Owner Withdrawal</p>
-            <p>{formatBusinessDate(row.withdrawnAt)} · {money(row.amountKgs, 'KGS')}</p>
+            <p className="font-semibold">Изъятие владельца</p>
+            <p>{formatBusinessDate(row.withdrawnAt)} · {moneySom(row.amountKgs)}</p>
             {row.description ? <p className="text-muted">{row.description}</p> : null}
           </Card>
         ))}

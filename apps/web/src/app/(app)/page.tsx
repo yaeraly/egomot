@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { money } from '@/lib/format';
+import { money, moneySom } from '@/lib/format';
 import { useAuth } from '@/lib/auth';
 import { DashboardSummary, FinanceDashboard, STATUS_LABELS, PurchaseStatus } from '@/lib/types';
 import { Badge, Card, PageHeader } from '@/components/ui';
@@ -58,7 +58,7 @@ export default function DashboardPage() {
           <FinanceDashboardCards data={finance} />
           {finance ? (
             <p className="text-sm text-muted">
-              Assets − (Liabilities + Equity) = {money(finance.balanceDifferenceKgs, 'KGS')}
+              Активы − (Обязательства + Капитал) = {moneySom(finance.balanceDifferenceKgs)}
             </p>
           ) : null}
         </section>

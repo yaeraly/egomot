@@ -1,6 +1,6 @@
 'use client';
 
-import { money } from '@/lib/format';
+import { moneySom } from '@/lib/format';
 import { FinanceDashboard } from '@/lib/types';
 import { Card } from '@/components/ui';
 
@@ -9,23 +9,23 @@ export const FINANCE_DASHBOARD_CARDS: Array<{
   label: string;
   testId: string;
 }> = [
-  { key: 'companyCashKgs', label: 'Company Cash', testId: 'company-cash' },
-  { key: 'companyBankKgs', label: 'Company Bank', testId: 'company-bank' },
-  { key: 'investorCapitalKgs', label: 'Investor Capital', testId: 'investor-capital' },
-  { key: 'accountsReceivableKgs', label: 'Accounts Receivable', testId: 'accounts-receivable' },
-  { key: 'supplierDebtKgs', label: 'Supplier AP', testId: 'supplier-ap' },
-  { key: 'cargoDebtKgs', label: 'Cargo AP', testId: 'cargo-ap' },
-  { key: 'inventoryValueKgs', label: 'Inventory Value', testId: 'inventory-value' },
-  { key: 'salesRevenueKgs', label: 'Revenue', testId: 'revenue' },
-  { key: 'cogsKgs', label: 'COGS', testId: 'cogs' },
-  { key: 'grossProfitKgs', label: 'Gross Profit', testId: 'gross-profit' },
-  { key: 'operatingExpensesKgs', label: 'Operating Expenses', testId: 'operating-expenses' },
-  { key: 'netProfitKgs', label: 'Net Profit', testId: 'net-profit' },
+  { key: 'companyCashKgs', label: 'Наличные', testId: 'company-cash' },
+  { key: 'companyBankKgs', label: 'Банк', testId: 'company-bank' },
+  { key: 'inventoryValueKgs', label: 'Стоимость товаров на складе', testId: 'inventory-value' },
+  { key: 'accountsReceivableKgs', label: 'Дебиторская задолженность', testId: 'accounts-receivable' },
+  { key: 'supplierDebtKgs', label: 'Долг поставщикам', testId: 'supplier-ap' },
+  { key: 'cargoDebtKgs', label: 'Долг за карго', testId: 'cargo-ap' },
+  { key: 'investorCapitalKgs', label: 'Капитал инвестора', testId: 'investor-capital' },
+  { key: 'salesRevenueKgs', label: 'Выручка', testId: 'revenue' },
+  { key: 'cogsKgs', label: 'Себестоимость', testId: 'cogs' },
+  { key: 'grossProfitKgs', label: 'Валовая прибыль', testId: 'gross-profit' },
+  { key: 'operatingExpensesKgs', label: 'Операционные расходы', testId: 'operating-expenses' },
+  { key: 'netProfitKgs', label: 'Чистая прибыль', testId: 'net-profit' },
 ];
 
 export function formatFinanceKgs(value: string | undefined) {
   if (value === undefined || value === '') return '—';
-  return money(value, 'KGS');
+  return moneySom(value);
 }
 
 export function FinanceDashboardCards({ data }: { data: FinanceDashboard | null }) {

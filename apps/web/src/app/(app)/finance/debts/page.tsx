@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { formatBusinessDate, money } from '@/lib/format';
+import { formatBusinessDate, moneySom } from '@/lib/format';
 import { Badge, Card, PageHeader } from '@/components/ui';
+import { PAYABLE_STATUS_LABELS } from '@/lib/finance-labels';
 
 type Tab = 'supplier' | 'cargo' | 'customer';
 
@@ -77,12 +78,12 @@ export default function DebtsPage() {
             <Card key={`${row.purchaseNumber}-${index}`} className="space-y-1 text-sm">
               <div className="flex justify-between gap-2">
                 <p className="font-semibold">{row.supplierName}</p>
-                <Badge>{row.status}</Badge>
+                <Badge>{PAYABLE_STATUS_LABELS[row.status] ?? row.status}</Badge>
               </div>
               <p className="text-muted">{row.purchaseNumber}</p>
-              <p>Сумма: {money(row.amountKgs, 'KGS')}</p>
-              <p>Оплачено: {money(row.paidAmountKgs, 'KGS')}</p>
-              <p>Остаток: {money(row.remainingAmountKgs, 'KGS')}</p>
+              <p>Сумма: {moneySom(row.amountKgs)}</p>
+              <p>Оплачено: {moneySom(row.paidAmountKgs)}</p>
+              <p>Остаток: {moneySom(row.remainingAmountKgs)}</p>
               {row.dueDate ? <p>Срок: {formatBusinessDate(row.dueDate)}</p> : null}
             </Card>
           ))
@@ -93,12 +94,12 @@ export default function DebtsPage() {
             <Card key={`${row.purchaseNumber}-${index}`} className="space-y-1 text-sm">
               <div className="flex justify-between gap-2">
                 <p className="font-semibold">{row.cargoVendorName ?? 'Карго'}</p>
-                <Badge>{row.status}</Badge>
+                <Badge>{PAYABLE_STATUS_LABELS[row.status] ?? row.status}</Badge>
               </div>
               <p className="text-muted">{row.purchaseNumber}</p>
-              <p>Карго: {money(row.amountKgs, 'KGS')}</p>
-              <p>Оплачено: {money(row.paidAmountKgs, 'KGS')}</p>
-              <p>Остаток: {money(row.remainingAmountKgs, 'KGS')}</p>
+              <p>Карго: {moneySom(row.amountKgs)}</p>
+              <p>Оплачено: {moneySom(row.paidAmountKgs)}</p>
+              <p>Остаток: {moneySom(row.remainingAmountKgs)}</p>
             </Card>
           ))
         : null}
@@ -107,15 +108,15 @@ export default function DebtsPage() {
         <div className="space-y-3">
           <Card>
             <p className="text-sm text-muted">Всего долга покупателей</p>
-            <p className="text-2xl font-bold">{money(customers?.totalOpenDebtKgs, 'KGS')}</p>
+            <p className="text-2xl font-bold">{moneySom(customers?.totalOpenDebtKgs)}</p>
           </Card>
           {customers?.sales.map((row) => (
             <Card key={row.saleNumber} className="space-y-1 text-sm">
               <p className="font-semibold">{row.clientName}</p>
               <p className="text-muted">{row.saleNumber}</p>
-              <p>Сумма: {money(row.originalAmountKgs, 'KGS')}</p>
-              <p>Оплачено: {money(row.paidAmountKgs, 'KGS')}</p>
-              <p>Остаток: {money(row.remainingKgs, 'KGS')}</p>
+              <p>Сумма: {moneySom(row.originalAmountKgs)}</p>
+              <p>Оплачено: {moneySom(row.paidAmountKgs)}</p>
+              <p>Остаток: {moneySom(row.remainingKgs)}</p>
             </Card>
           ))}
         </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { money } from '@/lib/format';
+import { moneySom } from '@/lib/format';
 import { FinanceDashboard } from '@/lib/types';
 import { PageHeader } from '@/components/ui';
 import { FinanceDashboardCards } from '@/components/FinanceDashboardCards';
@@ -20,7 +20,7 @@ export default function FinanceDashboardPage() {
     <div className="space-y-4">
       <PageHeader
         title="Финансы"
-        subtitle="Показатели компании по бухгалтерскому учету, не по кошелькам сотрудников"
+        subtitle="Показатели компании по бухгалтерскому учёту, не по кошелькам сотрудников"
       />
       <FinanceRangeBar
         preset={range.preset}
@@ -33,7 +33,7 @@ export default function FinanceDashboardPage() {
       <FinanceDashboardCards data={data} />
       {data ? (
         <p className="text-sm text-muted">
-          Assets − (Liabilities + Equity) = {money(data.balanceDifferenceKgs, 'KGS')}
+          Активы − (Обязательства + Капитал) = {moneySom(data.balanceDifferenceKgs)}
         </p>
       ) : null}
     </div>

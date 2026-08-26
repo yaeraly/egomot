@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { money } from '@/lib/format';
+import { moneySom } from '@/lib/format';
 import { Card, PageHeader } from '@/components/ui';
 import { FinanceRangeBar, useFinanceQuery } from '@/components/FinanceRange';
 
@@ -26,21 +26,21 @@ export default function ProfitLossPage() {
     void api<ProfitLossReport>(`/accounting/reports/profit-loss${range.query}`).then(setData);
   }, [range.query]);
 
-  const rows: Array<[string, string | undefined]> = [
-    ['Sales Revenue', data?.salesRevenueKgs],
-    ['− COGS', data?.cogsKgs],
-    ['= Gross Profit', data?.grossProfitKgs],
-    ['− Warehouse Rent', data?.warehouseRentKgs],
-    ['− Stationery', data?.stationeryKgs],
-    ['− Owner Salary', data?.ownerSalaryKgs],
-    ['− Other Operating Expenses', data?.otherOperatingExpensesKgs],
-    ['= Operating / Net Profit', data?.netProfitKgs],
+  const rows: Array<[string, string | undefined, boolean?]> = [
+    ['Выручка', data?.salesRevenueKgs],
+    ['− Себестоимость проданных товаров', data?.cogsKgs],
+    ['= Валовая прибыль', data?.grossProfitKgs, true],
+    ['− Аренда склада', data?.warehouseRentKgs],
+    ['− Канцтовары', data?.stationeryKgs],
+    ['− Зарплата владельца', data?.ownerSalaryKgs],
+    ['− Прочие операционные расходы', data?.otherOperatingExpensesKgs],
+    ['= Чистая прибыль', data?.netProfitKgs, true],
   ];
 
   return (
     <div className="space-y-4">
       <PageHeader
-        title="ОПУ"
+        title="ОПУ — Отчёт о прибылях и убытках"
         subtitle="Закупка товара, оплата поставщику и капитализированное карго не являются расходами периода"
       />
       <FinanceRangeBar
@@ -52,10 +52,10 @@ export default function ProfitLossPage() {
         setTo={range.setTo}
       />
       <Card className="space-y-2">
-        {rows.map(([label, value]) => (
-          <div key={label} className="flex justify-between gap-3 text-sm">
-            <span className="text-muted">{label}</span>
-            <span className="font-medium">{value ? money(value, 'KGS') : '—'}</span>
+        {rows.map(([label, value, strong]) => (
+          <div key={label} className={`flex justify-between gap-3 text-sm ${strong ? 'font-semibold' : ''}`}>
+            <span className={strong ? '' : 'text-muted'}>{label}</span>
+            <span>{value === undefined ? '—' : moneySom(value)}</span>
           </div>
         ))}
       </Card>

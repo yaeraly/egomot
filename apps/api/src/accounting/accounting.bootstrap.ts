@@ -7,12 +7,9 @@ import {
   ACCOUNT_CODE,
   COMPANY_PAYMENT_METHOD_CODE,
   DEFAULT_CHART_ACCOUNTS,
-  OPENING_INVESTOR_CAPITAL_KGS,
-  OPENING_INVESTOR_CAPITAL_SOURCE_ID,
   UNSPECIFIED_CARGO_VENDOR_NAME,
 } from './accounting-codes';
-import { buildOpeningInvestorCapitalLines } from './accounting-journal.logic';
-import { persistPostedJournal } from './accounting-journal.store';
+import { persistOpeningInvestorCapital } from './accounting-journal.store';
 
 export async function ensureDefaultChartAccounts(prisma: PrismaClient) {
   for (const account of DEFAULT_CHART_ACCOUNTS) {
@@ -150,13 +147,7 @@ export async function ensureOpeningInvestorCapital(prisma: PrismaClient) {
   if (!owner) {
     throw new Error('Opening investor capital requires an OWNER user');
   }
-  return persistPostedJournal(prisma, {
-    sourceType: 'OPENING_BALANCE',
-    sourceId: OPENING_INVESTOR_CAPITAL_SOURCE_ID,
-    memo: 'Opening investor capital',
-    lines: buildOpeningInvestorCapitalLines(OPENING_INVESTOR_CAPITAL_KGS),
-    createdByUserId: owner.id,
-  });
+  return persistOpeningInvestorCapital(prisma, owner.id);
 }
 
 export async function bootstrapAccountingLedger(prisma: PrismaClient) {

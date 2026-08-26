@@ -16,6 +16,13 @@ export const DATE_PRESETS = [
   { value: 'custom', label: 'Произвольный период' },
 ] as const;
 
+export const FINANCE_DATE_PRESETS = [
+  { value: 'today', label: 'Сегодня' },
+  { value: 'month', label: 'Этот месяц' },
+  { value: 'prev_month', label: 'Прошлый месяц' },
+  { value: 'custom', label: 'Выбрать период' },
+] as const;
+
 export type DatePresetValue = (typeof DATE_PRESETS)[number]['value'];
 
 export function monthInputRange(year: number, month: number) {
